@@ -1,4 +1,4 @@
-import AI_Input_Search from "../kokonutui/ai-input-search";
+import AI_Input_Search from "../../kokonutui/ai-input-search";
 
 export default function Input(){
     return(
