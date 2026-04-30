@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
 import type { ConversationSummary } from "@/lib/types";
 
@@ -31,22 +32,24 @@ export default async function DashboardLayout({
   const session = await auth();
 
   return (
-    <SidebarProvider>
-      <AppSidebar
-        conversations={stubConversations}
-        user={
-          session?.user
-            ? {
-                name: session.user.name,
-                email: session.user.email,
-                image: session.user.image,
-              }
-            : undefined
-        }
-      />
-      <SidebarInset className="flex min-h-svh flex-col">
-        {children}
-      </SidebarInset>
-    </SidebarProvider>
+    <TooltipProvider>
+      <SidebarProvider>
+        <AppSidebar
+          conversations={stubConversations}
+          user={
+            session?.user
+              ? {
+                  name: session.user.name,
+                  email: session.user.email,
+                  image: session.user.image,
+                }
+              : undefined
+          }
+        />
+        <SidebarInset className="flex min-h-svh flex-col">
+          {children}
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }
