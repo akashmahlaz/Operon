@@ -1,10 +1,21 @@
-'use client';
+import { MarketingNavbar } from "@/components/landing/navbar";
+import { Hero } from "@/components/landing/hero";
+import { Features } from "@/components/landing/features";
+import { HowItWorks } from "@/components/landing/how-it-works";
+import { Pricing } from "@/components/landing/pricing";
+import { MarketingFooter } from "@/components/landing/footer";
 
-
-export default function Home(){
- return(
-  <div className='min-h-screen w-full flex flex-col'>
-   
-  </div>
- )
+export default function HomePage() {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <MarketingNavbar />
+      <main className="flex-1">
+        <Hero />
+        <Features />
+        <HowItWorks />
+        <Pricing />
+      </main>
+      <MarketingFooter />
+    </div>
+  );
 }

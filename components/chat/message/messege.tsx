@@ -1,102 +1,117 @@
-'use client';
+"use client";
 
-import { useChat } from '@ai-sdk/react';
-import { useEffect, useRef } from 'react';
-import TextPart from './parts/textPart';
-import ReasoningPart from './parts/ai-reasoning';
-import ToolPart from './parts/tools/tools-show-ui';
+import { useChat } from "@ai-sdk/react";
+import { useEffect, useRef } from "react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
+import TextPart from "./parts/textPart";
+import ReasoningPart from "./parts/ai-reasoning";
+import ToolPart from "./parts/tools/tools-show-ui";
 
-// ─────────────────────────────────────
-// AVATAR — AI ya User ka icon
-// ─────────────────────────────────────
-function Avatar({ role }: { role: string }) {
-  const isUser = role === 'user';
+function MessageAvatar({ role }: { role: string }) {
+  const isUser = role === "user";
   return (
-    <div className={`
-      w-8 h-8 rounded-xl shrink-0 flex items-center justify-center
-      text-xs font-mono font-medium mt-0.5
-      ${isUser
-        ? 'bg-white/5 border border-white/10 text-white/40'
-        : 'bg-green-400/10 border border-green-400/20 text-green-400'
-      }
-    `}>
-      {isUser ? 'U' : 'AI'}
-    </div>
+    <Avatar className="h-7 w-7 shrink-0 rounded-lg">
+      <AvatarFallback
+        className={cn(
+          "rounded-lg text-[11px] font-medium",
+          isUser ? "bg-muted text-foreground/70" : "bg-primary/10 text-primary",
+        )}
+      >
+        {isUser ? "You" : <Sparkles className="h-3.5 w-3.5" />}
+      </AvatarFallback>
+    </Avatar>
   );
 }
 
-// ─────────────────────────────────────
-// PART RENDERER — decide karo kaunsa part render karna hai
-// ─────────────────────────────────────
 function PartRenderer({ part, role }: { part: any; role: string }) {
-  const isUser = role === 'user';
-
+  const isUser = role === "user";
   switch (part.type) {
-    case 'text':
+    case "text":
       return <TextPart text={part.text} isUser={isUser} />;
-
-    case 'reasoning':
-      return <ReasoningPart text={part.text} />;
-
-    case 'tool-invocation':
+    case "reasoning":
+      return <ReasoningPart text={part.text ?? part.reasoning ?? ""} />;
+    case "tool-invocation":
+    case "tool-call":
+    case "tool-result":
       return <ToolPart tool={part} />;
-
     default:
-      return null; // unknown part = kuch mat dikhao, crash mat karo
+      if (typeof part?.text === "string") {
+        return <TextPart text={part.text} isUser={isUser} />;
+      }
+      return null;
   }
 }
 
-// ─────────────────────────────────────
-// MESSAGE ROW — ek poora message (avatar + bubbles)
-// ─────────────────────────────────────
 function MessageRow({ message }: { message: any }) {
-  const isUser = message.role === 'user';
-
+  const isUser = message.role === "user";
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-
-      {/* Avatar */}
-      <Avatar role={message.role} />
-
-      {/* Saare parts is message ke */}
-      <div className={`flex flex-col gap-2 max-w-[75%] ${isUser ? 'items-end' : 'items-start'}`}>
-        {message.parts.map((part: any, i: number) => (
+    <div className={cn("flex gap-3", isUser && "flex-row-reverse")}>
+      <MessageAvatar role={message.role} />
+      <div
+        className={cn(
+          "flex max-w-[78%] flex-col gap-2",
+          isUser ? "items-end" : "items-start",
+        )}
+      >
+        {message.parts?.map((part: any, i: number) => (
           <PartRenderer key={i} part={part} role={message.role} />
         ))}
       </div>
-
     </div>
   );
 }
 
-// ─────────────────────────────────────
-// MAIN MESSAGE COMPONENT — yahi export hota hai page.tsx mein
-// ─────────────────────────────────────
+function EmptyState() {
+  const suggestions = [
+    "Draft a launch tweet for our v2",
+    "Summarise my last 5 emails",
+    "Schedule 30 min with Sara next week",
+    "Watch BTCUSDT, alert me on a 3% drop",
+  ];
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-16 text-center">
+      <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+        <Sparkles className="h-5 w-5" />
+      </div>
+      <div className="space-y-1">
+        <h2 className="font-heading text-2xl font-semibold tracking-tight">
+          What can I do for you today?
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Ask anything. Brilion will pick the right tools and run the steps.
+        </p>
+      </div>
+      <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+        {suggestions.map((s) => (
+          <div
+            key={s}
+            className="cursor-pointer rounded-xl border border-border bg-card p-3 text-left text-sm text-foreground/80 transition-colors hover:border-foreground/30 hover:bg-muted/50"
+          >
+            {s}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Message() {
   const { messages } = useChat();
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Naya message aane par automatically scroll karo neeche
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  if (messages.length === 0) return <EmptyState />;
+
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-6">
-
-      {/* Agar koi message nahi hai */}
-      {messages.length === 0 && (
-        <div className="flex-1 flex items-center justify-center h-full">
-          <p className="text-white/20 text-sm">Start a conversation...</p>
-        </div>
-      )}
-
-      {/* Har message render karo */}
-      {messages.map(message => (
+    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-6">
+      {messages.map((message) => (
         <MessageRow key={message.id} message={message} />
       ))}
-
-      {/* Yeh invisible div hai — scroll iske paas aata hai */}
       <div ref={bottomRef} />
     </div>
   );

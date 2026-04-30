@@ -1,32 +1,30 @@
-'use client';
-import { useState } from 'react';
+"use client";
 
-// AI ki thinking dikhata hai — collapse/expand hoti hai
+import { useState } from "react";
+import { ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+
 export default function ReasoningPart({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-
   return (
-    <div className="w-full border border-white/10 rounded-xl overflow-hidden">
-
-      {/* Yeh button click karo to open/close hoga */}
+    <div className="w-full rounded-xl border border-border bg-muted/30">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/5 transition-colors duration-150 cursor-pointer"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/60"
       >
-        <div className="w-3 h-3 rounded-full border border-purple-400/60 flex items-center justify-center">
-          <div className="w-1.5 h-1.5 rounded-full bg-purple-400/60" />
-        </div>
-        <span className="text-xs text-white/30 font-mono">Reasoning</span>
-        <span className="ml-auto text-white/20 text-xs">{open ? '▲' : '▼'}</span>
+        <ChevronRight
+          className={cn(
+            "h-3.5 w-3.5 text-muted-foreground transition-transform",
+            open && "rotate-90",
+          )}
+        />
+        <span className="text-xs text-muted-foreground">Reasoning</span>
       </button>
-
-      {/* Sirf tab dikhao jab open === true ho */}
       {open && (
-        <div className="px-3 py-2 border-t border-white/10 text-xs text-white/30 leading-relaxed font-mono whitespace-pre-wrap">
+        <div className="border-t border-border px-3 py-2 text-xs leading-relaxed text-foreground/70 whitespace-pre-wrap">
           {text}
         </div>
       )}
-
     </div>
   );
 }

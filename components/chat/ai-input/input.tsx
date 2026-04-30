@@ -1,229 +1,163 @@
-'use client';
+"use client";
 
-import { useChat } from '@ai-sdk/react';
-import { useState, useRef, useEffect } from 'react';
-import { ArrowUp, Paperclip, Mic, X, FileText } from 'lucide-react';
+import { useChat } from "@ai-sdk/react";
+import { useState, useRef, useEffect } from "react";
+import { ArrowUp, Paperclip, Mic, X, FileText, Square } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default function Input() {
-
-  // ─────────────────────────────────────────────
-  // STATE
-  // ─────────────────────────────────────────────
-
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [isRecording, setIsRecording] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { sendMessage, status } = useChat();
+  const { sendMessage, status, stop } = useChat();
 
-  const isStreaming = status === 'streaming' || status === 'submitted';
+  const isStreaming = status === "streaming" || status === "submitted";
   const canSend = input.trim().length > 0 && !isStreaming;
-
-  // ─────────────────────────────────────────────
-  // AUTO RESIZE TEXTAREA
-  // jab user type kare, textarea khud grow kare
-  // ─────────────────────────────────────────────
 
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = 'auto';                              // pehle collapse karo
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px'; // phir content ke hisaab se grow karo (max 160px)
-  }, [input]); // input badlega tab chalega
-
-  // ─────────────────────────────────────────────
-  // SEND MESSAGE
-  // ─────────────────────────────────────────────
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [input]);
 
   function handleSend() {
     if (!canSend) return;
     sendMessage({ text: input });
-    setInput('');
+    setInput("");
     setAttachedFile(null);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'; // send ke baad reset karo
-    }
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   }
 
-  // ─────────────────────────────────────────────
-  // KEYBOARD — Enter send karo, Shift+Enter newline
-  // ─────────────────────────────────────────────
-
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault(); // browser ka default newline rokta hai
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       handleSend();
     }
   }
 
-  // ─────────────────────────────────────────────
-  // FILE ATTACH
-  // ─────────────────────────────────────────────
-
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]; // pehli file lo
+    const file = e.target.files?.[0];
     if (!file) return;
     setAttachedFile(file);
-    e.target.value = ''; // input reset karo taaki same file dobara attach ho sake
+    e.target.value = "";
   }
-
-  function removeFile() {
-    setAttachedFile(null);
-  }
-
-  // ─────────────────────────────────────────────
-  // VOICE (placeholder — baad mein implement karein)
-  // ─────────────────────────────────────────────
-
-  function handleVoice() {
-    setIsRecording(!isRecording);
-    // TODO: Web Speech API yahan lagayenge baad mein
-  }
-
-  // ─────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────
 
   return (
-    <div className="w-full  bg- black px-4 py-4 border-t border-white/10 flex-shrink-0">
-
-      {/* ── File Preview — attach hui file dikhao ── */}
+    <div className="mx-auto w-full max-w-3xl px-4 pb-6">
       {attachedFile && (
-        <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-xl w-fit">
-          <FileText className="w-4 h-4 text-white/40" />
-          <span className="text-xs text-white/50 max-w-[200px] truncate">
+        <div className="mb-2 inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          <span className="max-w-[220px] truncate text-xs text-foreground/80">
             {attachedFile.name}
           </span>
           <button
-            onClick={removeFile}
-            className="ml-1 text-white/20 hover:text-white/60 transition-colors cursor-pointer"
+            type="button"
+            aria-label="Remove file"
+            onClick={() => setAttachedFile(null)}
+            className="ml-1 text-muted-foreground transition-colors hover:text-foreground"
           >
-            <X className="w-3 h-3" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
-      {/* ── Main Input Box ── */}
-      <div className={`
-        flex flex-col gap-2 px-3 py-3
-        bg-white/5 border rounded-2xl
-        transition-colors duration-200
-        ${isStreaming
-          ? 'border-white/5 opacity-70'        // streaming ke waqt dimmed
-          : 'border-white/10 focus-within:border-white/20'  // normal
-        }
-      `}>
-
-        {/* Textarea */}
+      <div
+        className={cn(
+          "flex flex-col gap-2 rounded-3xl border bg-card px-3 py-3 shadow-sm transition-colors",
+          isStreaming
+            ? "border-border opacity-90"
+            : "border-border focus-within:border-foreground/30",
+        )}
+      >
         <textarea
           ref={textareaRef}
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={isStreaming}
-          placeholder={isStreaming ? 'AI is responding...' : 'Message MiniMax...'}
+          placeholder={isStreaming ? "Brilion is responding…" : "Message Brilion…"}
           rows={1}
-          className="
-            w-full bg-transparent outline-none resize-none
-            text-sm text-white/80 placeholder-white/20
-            leading-relaxed caret-green-400
-            disabled:cursor-not-allowed
-            max-h-[160px] overflow-y-auto
-          "
-          style={{ scrollbarWidth: 'none' }} // scrollbar hide karo textarea mein
+          className="max-h-[200px] w-full resize-none bg-transparent px-1 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed"
+          style={{ scrollbarWidth: "none" }}
         />
 
-        {/* ── Bottom Bar — buttons ── */}
         <div className="flex items-center justify-between">
-
-          {/* LEFT — Attach + Voice */}
           <div className="flex items-center gap-1">
-
-            {/* Hidden file input — real file picker */}
             <input
               ref={fileInputRef}
               type="file"
               className="hidden"
               onChange={handleFileChange}
-              accept="image/*,.pdf,.doc,.docx,.txt" // allowed file types
+              accept="image/*,.pdf,.doc,.docx,.txt,.md"
             />
-
-            {/* Paperclip button — file input trigger karta hai */}
             <button
+              type="button"
+              aria-label="Attach file"
               onClick={() => fileInputRef.current?.click()}
               disabled={isStreaming}
-              className="
-                w-8 h-8 rounded-xl flex items-center justify-center
-                text-white/30 hover:text-white/60 hover:bg-white/5
-                transition-all duration-150 cursor-pointer
-                disabled:opacity-30 disabled:cursor-not-allowed
-              "
+              className="flex h-8 w-8 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
             >
-              <Paperclip className="w-4 h-4" />
+              <Paperclip className="h-4 w-4" />
             </button>
-
-            {/* Voice button */}
             <button
-              onClick={handleVoice}
+              type="button"
+              aria-label="Voice input"
+              onClick={() => setIsRecording((v) => !v)}
               disabled={isStreaming}
-              className={`
-                w-8 h-8 rounded-xl flex items-center justify-center
-                transition-all duration-150 cursor-pointer
-                disabled:opacity-30 disabled:cursor-not-allowed
-                ${isRecording
-                  ? 'text-red-400 bg-red-400/10 border border-red-400/20 animate-pulse' // recording state
-                  : 'text-white/30 hover:text-white/60 hover:bg-white/5'                // idle state
-                }
-              `}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-xl transition-colors disabled:opacity-40",
+                isRecording
+                  ? "bg-destructive/10 text-destructive"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
             >
-              <Mic className="w-4 h-4" />
+              <Mic className="h-4 w-4" />
             </button>
-
           </div>
 
-          {/* RIGHT — Character count + Send button */}
           <div className="flex items-center gap-3">
-
-            {/* Character count — sirf tab dikhao jab type ho raha ho */}
             {input.length > 0 && (
-              <span className="text-[10px] font-mono text-white/20">
+              <span className="font-mono text-[10px] text-muted-foreground/60">
                 {input.length}
               </span>
             )}
-
-            {/* Send button */}
-            <button
-              onClick={handleSend}
-              disabled={!canSend}
-              className={`
-                w-8 h-8 rounded-xl flex items-center justify-center
-                transition-all duration-200 cursor-pointer
-                ${canSend
-                  ? 'bg-green-400 hover:bg-green-300 active:scale-95'  // ready to send
-                  : 'bg-white/10 cursor-not-allowed'                    // disabled
-                }
-              `}
-            >
-              {/* Streaming ke waqt spinner, warna arrow */}
-              {isStreaming ? (
-                <div className="w-3.5 h-3.5 rounded-full border border-white/30 border-t-white/80 animate-spin" />
-              ) : (
-                <ArrowUp className={`w-4 h-4 ${canSend ? 'text-black' : 'text-white/20'}`} />
-              )}
-            </button>
-
+            {isStreaming ? (
+              <button
+                type="button"
+                onClick={() => stop()}
+                aria-label="Stop"
+                className="flex h-8 w-8 items-center justify-center rounded-xl bg-foreground text-background transition-transform hover:scale-105"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!canSend}
+                aria-label="Send message"
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-xl transition-all",
+                  canSend
+                    ? "bg-foreground text-background hover:scale-105 active:scale-95"
+                    : "bg-muted text-muted-foreground",
+                )}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ── Bottom hint ── */}
-      <p className="text-center text-[10px] text-white/15 font-mono mt-2">
+      <p className="mt-2 text-center font-mono text-[10px] text-muted-foreground/60">
         Enter to send · Shift+Enter for new line
       </p>
-
     </div>
   );
-} 
+}
