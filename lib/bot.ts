@@ -1,9 +1,9 @@
 import { Chat } from "chat";
-import { createSlackAdapter } from "@chat-adapter/slack";
-import { createRedisState } from "@chat-adapter/state-redis";
 import { createMemoryState } from "@chat-adapter/state-memory";
 import { useMultiFileAuthState } from "baileys";
 import { createBaileysAdapter } from "chat-adapter-baileys";
+
+
 // 1. Load (or create) the session credentials
 const { state, saveCreds } = await useMultiFileAuthState("./auth_info");
 // 2. Create the adapter
