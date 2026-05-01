@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 
 // In-memory store (per server process). Swap for MongoDB later.
-type Msg = { role: "user" | "assistant" | "system"; content: string; createdAt: string; parts?: any[] };
+type Msg = { role: "user" | "assistant" | "system"; content: string; createdAt: string; parts?: unknown[] };
 type Conv = {
   _id: string;
   title: string;
@@ -15,10 +15,9 @@ type Conv = {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
-  var __brilion_convs: Map<string, Conv> | undefined;
+  var __operon_convs: Map<string, Conv> | undefined;
 }
-const store: Map<string, Conv> = (globalThis.__brilion_convs ??= new Map());
+const store: Map<string, Conv> = (globalThis.__operon_convs ??= new Map());
 
 function summary(c: Conv) {
   const { messages: _msgs, ...rest } = c;

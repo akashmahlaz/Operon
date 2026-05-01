@@ -33,9 +33,6 @@ import {
   Shield,
   PanelLeftClose,
   PanelLeft,
-  Volume2,
-  Wrench,
-  Bot,
 } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -373,7 +370,6 @@ function ChatPage() {
     loadChannelStatus();
     const poll = setInterval(loadConversations, 8000);
     return () => clearInterval(poll);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sync URL conversation id
@@ -381,11 +377,13 @@ function ChatPage() {
     if (urlConvId && urlConvId !== conversationId) {
       loadConversation(urlConvId);
     } else if (!urlConvId && conversationId) {
-      setConversationId(null);
-      setChatMessages([]);
-      setActiveChannel("web");
+      queueMicrotask(() => {
+        setConversationId(null);
+        setChatMessages([]);
+        setActiveChannel("web");
+      });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlConvId]);
 
   useEffect(() => {
@@ -868,7 +866,7 @@ function ChatPage() {
                         Channels
                       </h3>
                       <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        Connect platforms to Brilion AI
+                        Connect platforms to Operon AI
                       </p>
                     </div>
 
@@ -1084,7 +1082,7 @@ function ChatPage() {
                                 {
                                   value: "dedicated",
                                   label: "Dedicated",
-                                  desc: "Brilion only",
+                                  desc: "Operon only",
                                   icon: Shield,
                                 },
                               ] as const
@@ -1570,7 +1568,7 @@ function ChatPage() {
                   placeholder={
                     isChannelConversation
                       ? `Viewing ${CHANNEL_META[activeChannel]?.label} conversation`
-                      : "Message Brilion…"
+                      : "Message Operon…"
                   }
                   rows={1}
                   className="min-h-14 max-h-40 resize-none border-0 bg-transparent py-4 pl-12 pr-14 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
@@ -1606,7 +1604,7 @@ function ChatPage() {
               </div>
             </div>
             <p className="mt-2 text-center text-[11px] text-muted-foreground">
-              Brilion can make mistakes. Verify important information.
+              Operon can make mistakes. Verify important information.
             </p>
           </div>
         </div>

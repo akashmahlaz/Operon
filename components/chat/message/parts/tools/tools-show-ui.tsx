@@ -18,10 +18,26 @@ const toolLabels: Record<string, string> = {
   whatsapp_send: "Sending on WhatsApp",
 };
 
-export default function ToolPart({ tool }: { tool: any }) {
-  const inv = tool.toolInvocation ?? tool;
-  const toolName: string = inv.toolName ?? inv.name ?? "tool";
-  const state: string = inv.state ?? inv.status ?? "result";
+type ToolLike = {
+  toolInvocation?: ToolInvocationLike;
+  toolName?: string;
+  name?: string;
+  state?: string;
+  status?: string;
+};
+
+type ToolInvocationLike = Omit<ToolLike, "toolInvocation">;
+
+function toToolLike(value: unknown): ToolLike {
+  if (value && typeof value === "object") return value as ToolLike;
+  return {};
+}
+
+export default function ToolPart({ tool }: { tool: unknown }) {
+  const toolLike = toToolLike(tool);
+  const inv = toolLike.toolInvocation ?? toolLike;
+  const toolName = inv.toolName ?? inv.name ?? "tool";
+  const state = inv.state ?? inv.status ?? "result";
 
   const label = toolLabels[toolName] ?? toolName;
   const isPending =

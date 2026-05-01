@@ -30,7 +30,7 @@ export function Hero() {
         </h1>
 
         <p className="mt-6 max-w-2xl text-balance text-lg text-foreground/70 md:text-xl">
-          Brilion connects to the tools you already use and turns natural-language
+          Operon connects to the tools you already use and turns natural-language
           requests into multi-step workflows — coding, marketing, scheduling, sales,
           all from a single chat.
         </p>

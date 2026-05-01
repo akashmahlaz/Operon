@@ -20,4 +20,5 @@ export const collections = {
   integrations: () => db().collection("integrations"),
   jobs: () => db().collection("jobs"),
   logs: () => db().collection("logs"),
+  users: () => db().collection("users"),
 };

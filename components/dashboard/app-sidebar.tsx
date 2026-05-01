@@ -27,11 +27,10 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BrilionMark, BrilionWordmark } from "@/components/brand";
+import { OperonMark, OperonWordmark } from "@/components/brand";
 import { dashboardNav } from "@/lib/nav";
 import type { ConversationSummary } from "@/lib/types";
 import { Plus, Search, LogOut, Settings, User, MoreHorizontal, Trash2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { signOut } from "next-auth/react";
 
 interface AppSidebarProps {
@@ -45,20 +44,14 @@ const groupLabels: Record<string, string> = {
   system: "System",
 };
 
-const channelDot: Record<ConversationSummary["channel"], string> = {
-  web: "bg-blue-500",
-  whatsapp: "bg-emerald-500",
-  telegram: "bg-sky-500",
-};
-
 export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
   const pathname = usePathname();
   const [query, setQuery] = React.useState("");
 
-  const filteredConvs = React.useMemo(() => {
-    if (!query.trim()) return conversations;
+  const conversationCount = React.useMemo(() => {
+    if (!query.trim()) return conversations.length;
     const q = query.toLowerCase();
-    return conversations.filter((c) => c.title.toLowerCase().includes(q));
+    return conversations.filter((c) => c.title.toLowerCase().includes(q)).length;
   }, [conversations, query]);
 
   const initials = (user?.name ?? user?.email ?? "U")
@@ -77,9 +70,9 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarHeader className="gap-3">
         <Link href="/dashboard/chat" className="flex items-center gap-2 px-2 py-1">
-          <BrilionMark />
+          <OperonMark />
           <span className="group-data-[collapsible=icon]:hidden">
-            <BrilionWordmark height={16} />
+            <OperonWordmark height={16} />
           </span>
         </Link>
 
@@ -104,6 +97,11 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
             placeholder="Search conversations"
             className="h-9 rounded-xl bg-card/50 pl-8 text-xs"
           />
+          {query ? (
+            <p className="mt-1 px-1 text-[10px] text-muted-foreground">
+              {conversationCount} matches
+            </p>
+          ) : null}
         </div>
       </SidebarHeader>
 

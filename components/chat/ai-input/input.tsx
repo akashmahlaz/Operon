@@ -80,7 +80,7 @@ export default function Input() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={isStreaming}
-          placeholder={isStreaming ? "Brilion is responding…" : "Message Brilion…"}
+          placeholder={isStreaming ? "Operon is responding…" : "Message Operon…"}
           rows={1}
           className="max-h-50 w-full resize-none bg-transparent px-1 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed"
           style={{ scrollbarWidth: "none" }}

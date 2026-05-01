@@ -98,7 +98,7 @@ export function HowItWorks() {
             </p>
           </div>
           <div className="rounded-2xl border border-border bg-card p-6">
-            <p className="text-xs font-medium uppercase tracking-wider text-foreground/50">Brilion does</p>
+            <p className="text-xs font-medium uppercase tracking-wider text-foreground/50">Operon does</p>
             <ul className="mt-3 space-y-3">
               {current.bot.map((step, i) => (
                 <li key={i} className="flex items-start gap-3 text-sm">

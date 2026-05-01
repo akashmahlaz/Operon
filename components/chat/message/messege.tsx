@@ -9,6 +9,20 @@ import TextPart from "./parts/textPart";
 import ReasoningPart from "./parts/ai-reasoning";
 import ToolPart from "./parts/tools/tools-show-ui";
 
+type ChatPart = {
+  type: string;
+  text?: string;
+  reasoning?: string;
+  toolInvocation?: unknown;
+  [key: string]: unknown;
+};
+
+type ChatMessage = {
+  id: string;
+  role: string;
+  parts?: ChatPart[];
+};
+
 function MessageAvatar({ role }: { role: string }) {
   const isUser = role === "user";
   return (
@@ -25,11 +39,11 @@ function MessageAvatar({ role }: { role: string }) {
   );
 }
 
-function PartRenderer({ part, role }: { part: any; role: string }) {
+function PartRenderer({ part, role }: { part: ChatPart; role: string }) {
   const isUser = role === "user";
   switch (part.type) {
     case "text":
-      return <TextPart text={part.text} isUser={isUser} />;
+      return <TextPart text={part.text ?? ""} isUser={isUser} />;
     case "reasoning":
       return <ReasoningPart text={part.text ?? part.reasoning ?? ""} />;
     case "tool-invocation":
@@ -44,7 +58,7 @@ function PartRenderer({ part, role }: { part: any; role: string }) {
   }
 }
 
-function MessageRow({ message }: { message: any }) {
+function MessageRow({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
     <div className={cn("flex gap-3", isUser && "flex-row-reverse")}>
@@ -55,7 +69,7 @@ function MessageRow({ message }: { message: any }) {
           isUser ? "items-end" : "items-start",
         )}
       >
-        {message.parts?.map((part: any, i: number) => (
+        {message.parts?.map((part, i) => (
           <PartRenderer key={i} part={part} role={message.role} />
         ))}
       </div>
@@ -83,7 +97,7 @@ function EmptyState() {
           What can I do for you today?
         </h2>
         <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-          Ask anything. Brilion picks the right tools and runs the steps for you.
+          Ask anything. Operon picks the right tools and runs the steps for you.
         </p>
       </div>
       <div className="grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-2">

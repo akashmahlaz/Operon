@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BrilionWordmark } from "@/components/brand";
+import { OperonWordmark } from "@/components/brand";
 
 const cols = [
   {
@@ -36,7 +36,7 @@ export function MarketingFooter() {
     <footer className="border-t border-border/60 bg-background py-14">
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-10 px-4 md:grid-cols-5">
         <div className="md:col-span-2">
-          <BrilionWordmark height={18} />
+          <OperonWordmark height={18} />
           <p className="mt-4 max-w-sm text-sm text-foreground/60">
             One chat. All your work. The browser-based AI operating system for the
             tools you already use.
@@ -61,7 +61,7 @@ export function MarketingFooter() {
         ))}
       </div>
       <div className="mx-auto mt-10 flex max-w-6xl flex-col items-start justify-between gap-3 border-t border-border/60 px-4 pt-6 text-xs text-foreground/50 md:flex-row md:items-center">
-        <span>© {new Date().getFullYear()} Brilion. All rights reserved.</span>
+        <span>© {new Date().getFullYear()} Operon. All rights reserved.</span>
         <span className="font-mono">v0.1 · built with Next.js + Vercel AI SDK</span>
       </div>
     </footer>

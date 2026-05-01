@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "brilion/**",
+    "hermes-agent/**",
+    "openclaw/**",
+    "chat-sdk-docs/**",
+    "public/**",
   ]),
 ]);
 

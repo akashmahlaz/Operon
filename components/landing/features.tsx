@@ -11,7 +11,7 @@ const features = [
   {
     icon: Bot,
     title: "Conversational by default",
-    body: "Type — or speak — what you want. Brilion picks the right tools and runs the steps for you.",
+    body: "Type — or speak — what you want. Operon picks the right tools and runs the steps for you.",
   },
   {
     icon: Workflow,
@@ -45,7 +45,7 @@ export function Features() {
     <section id="features" className="border-t border-border/60 bg-background py-24">
       <div className="mx-auto max-w-6xl px-4">
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-sm font-medium text-primary">Why Brilion</p>
+          <p className="text-sm font-medium text-primary">Why Operon</p>
           <h2 className="font-heading mt-2 text-3xl font-semibold tracking-tight md:text-5xl">
             One chat. All your work.
           </h2>

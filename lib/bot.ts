@@ -1,11 +1,11 @@
 import { Chat } from "chat";
 import { createMemoryState } from "@chat-adapter/state-memory";
-import { useMultiFileAuthState } from "baileys";
+import { useMultiFileAuthState as createMultiFileAuthState } from "baileys";
 import { createBaileysAdapter } from "chat-adapter-baileys";
 
 
 // 1. Load (or create) the session credentials
-const { state, saveCreds } = await useMultiFileAuthState("./auth_info");
+const { state, saveCreds } = await createMultiFileAuthState("./auth_info");
 // 2. Create the adapter
 const whatsapp = createBaileysAdapter({
   auth: { state, saveCreds },

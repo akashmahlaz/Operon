@@ -1,29 +1,37 @@
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 
-export function BrilionWordmark({
+export function OperonWordmark({
   className,
   height = 18,
 }: {
   className?: string;
   height?: number;
 }) {
-  // Aspect ratio of the source SVG is ~718:204
-  const width = Math.round((height * 718) / 204);
+  // Inline SVG wordmark for Operon - avoids external file dependency
   return (
-    <Image
-      src="/brilion-wordmark.svg"
-      alt="Brilion"
-      width={width}
-      height={height}
-      priority
-      className={cn("h-[18px] w-auto select-none", className)}
-    />
+    <svg
+      viewBox="0 0 120 32"
+      fill="none"
+      className={cn("select-none", className)}
+      style={{ height, width: "auto" }}
+      aria-label="Operon"
+    >
+      <text
+        x="0"
+        y="24"
+        fontFamily="system-ui, -apple-system, sans-serif"
+        fontSize="26"
+        fontWeight="700"
+        fill="currentColor"
+      >
+        Operon
+      </text>
+    </svg>
   );
 }
 
-export function BrilionMark({ className }: { className?: string }) {
-  // Compact diamond mark used in tight spaces (sidebar collapsed, favicon-ish)
+export function OperonMark({ className }: { className?: string }) {
+  // Compact diamond/O mark used in tight spaces (sidebar collapsed, favicon-ish)
   return (
     <span
       className={cn(
@@ -32,9 +40,14 @@ export function BrilionMark({ className }: { className?: string }) {
       )}
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M12 2 L22 12 L12 22 L2 12 Z" />
-        <path d="M12 7 L17 12 L12 17 L7 12 Z" />
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7 L15 12 L12 17 L9 12 Z" />
+        <circle cx="12" cy="12" r="3" />
       </svg>
     </span>
   );
 }
+
+// Backwards compatibility aliases
+export const BrilionWordmark = OperonWordmark;
+export const BrilionMark = OperonMark;

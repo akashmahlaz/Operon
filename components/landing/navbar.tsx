@@ -1,80 +1,260 @@
-"use client";
-
+"use client"
+import { useState, useRef } from 'react';
 import Link from "next/link";
-import { useState } from "react";
-import { BrilionWordmark } from "@/components/brand";
-import { Button } from "@/components/ui/button";
-import { marketingNav } from "@/lib/nav";
-import { Menu, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ArrowRight, ChevronDown, Menu, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useSession } from "next-auth/react";
+import { OperonWordmark } from "@/components/brand";
 
-export function MarketingNavbar() {
-  const [open, setOpen] = useState(false);
+/* ── Dropdown Data ── */
+const navDropdowns: Record<
+  string,
+  { sections: { title: string; items: { name: string; desc: string; href: string }[] }[] }
+> = {
+  PLATFORM: {
+    sections: [
+      {
+        title: 'Automation',
+        items: [
+          { name: 'Chat AI', desc: 'Talk to Operon via WhatsApp or web', href: '/dashboard/chat' },
+          { name: 'Agents', desc: 'Autonomous AI agents that act for you', href: '/agents' },
+          { name: 'Workflows', desc: 'Multi-step automation pipelines', href: '/skills' },
+          { name: 'Integrations', desc: '30+ app connectors built-in', href: '/#integrations' },
+        ],
+      },
+      {
+        title: 'Infrastructure',
+        items: [
+          { name: 'AI Models', desc: 'GPT-4o, Claude, Gemini and more', href: '/settings' },
+          { name: 'Channels', desc: 'WhatsApp, Telegram, Web chat', href: '/channels' },
+        ],
+      },
+    ],
+  },
+  'USE CASES': {
+    sections: [
+      {
+        title: 'Industries',
+        items: [
+          { name: 'Digital Marketing', desc: 'Create and publish ads from chat', href: '/social' },
+          { name: 'Trading', desc: 'Auto-trade on Binance via commands', href: '/trading' },
+          { name: 'Development', desc: 'Deploy code, manage repos', href: '/coding' },
+          { name: 'Content Creation', desc: 'Generate videos and publish', href: '/#features' },
+        ],
+      },
+      {
+        title: 'Roles',
+        items: [
+          { name: 'Founders', desc: 'Run your business from WhatsApp', href: '/#how-it-works' },
+          { name: 'Professionals', desc: 'Automate admin and scheduling', href: '/#how-it-works' },
+        ],
+      },
+    ],
+  },
+  RESOURCES: {
+    sections: [
+      {
+        title: 'Learn',
+        items: [
+          { name: 'Blog', desc: 'Updates and product announcements', href: '/blog' },
+          { name: 'Documentation', desc: 'Guides and API reference', href: '/docs' },
+          { name: 'Changelog', desc: 'What\'s new in Operon', href: '/changelog' },
+        ],
+      },
+    ],
+  },
+  COMPANY: {
+    sections: [
+      {
+        title: 'About',
+        items: [
+          { name: 'About Us', desc: 'Our mission and team', href: '/about' },
+          { name: 'Careers', desc: 'Join Operon', href: '/careers' },
+          { name: 'Contact', desc: 'Get in touch', href: '/contact' },
+        ],
+      },
+    ],
+  },
+}
+
+export default function Navbar() {
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { data: session } = useSession()
+  const isLoggedIn = !!session?.user
+
+  const handleMouseEnter = (label: string) => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    setActiveDropdown(label)
+  }
+
+  const handleMouseLeave = () => {
+    timeoutRef.current = setTimeout(() => setActiveDropdown(null), 150)
+  }
+
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-border/60 bg-background/70 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4">
-        <Link href="/" className="flex items-center gap-2">
-          <BrilionWordmark height={16} />
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-2xl border-b border-gray-100/60">
+      <div className="max-w-7xl mx-auto px-6 lg:px-8 flex items-center justify-between h-16">
+        {/* Logo */}
+        <Link href="/" className="flex items-center shrink-0 -ml-1">
+          <OperonWordmark height={24} className="text-gray-950" />
         </Link>
 
-        <nav className="hidden items-center gap-7 md:flex">
-          {marketingNav.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="text-sm text-foreground/70 transition-colors hover:text-foreground"
+        {/* Desktop Nav — mega dropdown */}
+        <div className="hidden md:flex items-center gap-1">
+          {Object.keys(navDropdowns).map((label) => (
+            <div
+              key={label}
+              className="relative"
+              onMouseEnter={() => handleMouseEnter(label)}
+              onMouseLeave={handleMouseLeave}
             >
-              {item.title}
-            </Link>
-          ))}
-        </nav>
+              <button
+                className={`flex items-center gap-1 px-4 py-2 text-xs font-semibold tracking-widest transition-colors rounded-lg hover:bg-gray-50 ${
+                  activeDropdown === label ? 'text-gray-900' : 'text-gray-500'
+                }`}
+              >
+                {label}
+                <ChevronDown
+                  className={`size-3 transition-transform duration-200 ${activeDropdown === label ? 'rotate-180' : ''}`}
+                />
+              </button>
 
-        <div className="hidden items-center gap-2 md:flex">
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/dashboard/chat">Sign in</Link>
-          </Button>
-          <Button asChild size="sm" className="rounded-full">
-            <Link href="/dashboard/chat">Start free</Link>
-          </Button>
+              <AnimatePresence>
+                {activeDropdown === label && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white rounded-2xl shadow-2xl shadow-gray-200/60 border border-gray-100 p-5 min-w-85"
+                    onMouseEnter={() => handleMouseEnter(label)}
+                    onMouseLeave={handleMouseLeave}
+                  >
+                    <div
+                      className={`grid gap-6 ${
+                        navDropdowns[label].sections.length > 1
+                          ? 'grid-cols-2'
+                          : 'grid-cols-1'
+                      }`}
+                    >
+                      {navDropdowns[label].sections.map((section) => (
+                        <div key={section.title}>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+                            {section.title}
+                          </p>
+                          <div className="space-y-1">
+                            {section.items.map((item) => (
+                              <a
+                                key={item.name}
+                                href={item.href}
+                                className="group flex flex-col px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors"
+                              >
+                                <span className="text-sm font-semibold text-gray-800 group-hover:text-gray-900 flex items-center gap-1">
+                                  {item.name}
+                                  <ArrowRight className="size-3 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" />
+                                </span>
+                                <span className="text-xs text-gray-400 mt-0.5">
+                                  {item.desc}
+                                </span>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ))}
         </div>
 
+        {/* Desktop CTAs */}
+        <div className="hidden md:flex items-center gap-3">
+          {isLoggedIn ? (
+            <Link
+              href="/dashboard/chat"
+              className="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-all shadow-[inset_0_0_12px_rgba(255,255,255,0.3)]"
+            >
+              Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="px-5 py-2.5 border border-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-50 transition-all"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/signup"
+                className="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-all shadow-[inset_0_0_12px_rgba(255,255,255,0.3)]"
+              >
+                Get Started
+              </Link>
+            </>
+          )}
+        </div>
+
+        {/* Mobile toggle */}
         <button
-          type="button"
-          aria-label="Toggle menu"
-          onClick={() => setOpen((v) => !v)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border md:hidden"
+          className="md:hidden p-2 -mr-2 text-gray-600 hover:text-gray-900"
+          onClick={() => setMobileOpen(!mobileOpen)}
         >
-          {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+          {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
         </button>
       </div>
 
-      <div
-        className={cn(
-          "border-t border-border/60 bg-background md:hidden",
-          open ? "block" : "hidden",
+      {/* Mobile menu */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="md:hidden bg-white border-t border-gray-100 overflow-hidden"
+          >
+            <div className="px-6 py-4 space-y-1">
+              {Object.keys(navDropdowns).map((label) => (
+                <button
+                  key={label}
+                  className="block w-full text-left text-xs font-bold tracking-widest text-gray-600 py-3 border-b border-gray-50"
+                >
+                  {label}
+                </button>
+              ))}
+              <div className="pt-4 space-y-3">
+                {isLoggedIn ? (
+                  <Link
+                    href="/dashboard/chat"
+                    className="block w-full text-center px-5 py-3 bg-gray-900 text-white text-sm font-medium rounded-full"
+                  >
+                    Dashboard
+                  </Link>
+                ) : (
+                  <>
+                    <Link
+                      href="/signup"
+                      className="block w-full text-center px-5 py-3 bg-gray-900 text-white text-sm font-medium rounded-full"
+                    >
+                      Get Started
+                    </Link>
+                    <Link
+                      href="/login"
+                      className="block w-full text-center px-5 py-3 border border-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-50"
+                    >
+                      Log in
+                    </Link>
+                  </>
+                )}
+              </div>
+            </div>
+          </motion.div>
         )}
-      >
-        <div className="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3">
-          {marketingNav.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="rounded-md px-2 py-2 text-sm text-foreground/80 hover:bg-muted"
-            >
-              {item.title}
-            </Link>
-          ))}
-          <div className="mt-2 flex gap-2">
-            <Button asChild variant="outline" size="sm" className="flex-1">
-              <Link href="/dashboard/chat">Sign in</Link>
-            </Button>
-            <Button asChild size="sm" className="flex-1 rounded-full">
-              <Link href="/dashboard/chat">Start free</Link>
-            </Button>
-          </div>
-        </div>
-      </div>
-    </header>
-  );
+      </AnimatePresence>
+    </nav>
+  )
 }

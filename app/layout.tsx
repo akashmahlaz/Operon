@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SessionProvider } from "@/components/ui/session-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -23,9 +24,9 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Brilion — Automate everything from one message.",
+  title: "Operon — AI Gateway",
   description:
-    "A browser-based AI operating system that connects to your tools and automates multi-step workflows from a single chat.",
+    "AI gateway for multi-channel chat, agents, and workflow automation.",
 };
 
 export default function RootLayout({
@@ -37,10 +38,12 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${jakarta.variable} ${spaceGrotesk.variable} ${jetBrainsMono.variable} h-full`}
     >
-      <body className="min-h-full font-sans antialiased">
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-          {children}
-          <Toaster richColors position="top-right" />
+      <body className="min-h-full font-sans antialiased" suppressHydrationWarning>
+        <ThemeProvider>
+          <SessionProvider>
+            {children}
+            <Toaster richColors position="top-right" />
+          </SessionProvider>
         </ThemeProvider>
       </body>
     </html>
