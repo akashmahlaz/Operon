@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, Copy, ExternalLink, Eye, EyeOff, Loader2, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,8 @@ interface AuthProfile {
   provider: string;
   tokenRef: string;
   baseUrl?: string;
+  models?: string[];
+  defaultModel?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -30,23 +32,47 @@ interface CopilotFlow {
   expiresIn: number;
 }
 
+interface ProviderApiState {
+  providers: ProviderMeta[];
+  profiles: AuthProfile[];
+  defaultModel: string;
+  recentProviderId: string | null;
+}
+
 export function ProvidersSettings() {
   const [providers, setProviders] = useState(providerCatalog);
-  const [profiles, setProfiles] = useState<AuthProfile[]>(
-    providerCatalog
-      .filter((provider) => provider.configured && provider.tokenRef)
-      .map((provider) => ({
-        profileId: provider.id,
-        provider: provider.id,
-        tokenRef: provider.tokenRef || "saved:key",
-        updatedAt: provider.updatedAt,
-      })),
-  );
+  const [profiles, setProfiles] = useState<AuthProfile[]>([]);
   const [currentModel, setCurrentModel] = useState("minimax/MiniMax-M2.7");
   const [search, setSearch] = useState("");
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [recentProviderId, setRecentProviderId] = useState<string | null>("minimax");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  async function loadProviders() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const response = await fetch("/api/providers", { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to load providers");
+      const data = await response.json() as ProviderApiState;
+      setProviders(data.providers);
+      setProfiles(data.profiles);
+      setCurrentModel(data.defaultModel || "minimax/MiniMax-M2.7");
+      setRecentProviderId(data.recentProviderId || "minimax");
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Failed to load providers");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void loadProviders();
+    });
+  }, []);
 
   const visibleGroups = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -84,10 +110,25 @@ export function ProvidersSettings() {
     setRecentProviderId(providerId);
   }
 
+  function syncConnectedProvider(providerId: string, profile: AuthProfile, models: string[], defaultModel?: string) {
+    const updatedAt = profile.updatedAt || new Date().toISOString();
+    setProviders((previous) => previous.map((provider) => provider.id === providerId ? { ...provider, configured: true, tokenRef: profile.tokenRef, updatedAt, models, defaultModel } : provider));
+    setProfiles((previous) => [...previous.filter((item) => item.provider !== providerId), { ...profile, models, defaultModel, updatedAt }]);
+    setRecentProviderId(providerId);
+  }
+
   function disconnectProvider(providerId: string) {
     setProviders((previous) => previous.map((provider) => provider.id === providerId ? { ...provider, configured: false, tokenRef: undefined, updatedAt: undefined } : provider));
     setProfiles((previous) => previous.filter((profile) => profile.provider !== providerId));
     if (currentModel.startsWith(`${providerId}/`)) setCurrentModel("");
+  }
+
+  async function disconnectProviderRemote(providerId: string) {
+    const profile = profiles.find((item) => item.provider === providerId);
+    const profileId = profile?.profileId || `${providerId}:api_key`;
+    const response = await fetch(`/api/providers?profileId=${encodeURIComponent(profileId)}&provider=${encodeURIComponent(providerId)}`, { method: "DELETE" });
+    if (!response.ok) throw new Error("Failed to disconnect provider");
+    disconnectProvider(providerId);
   }
 
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
@@ -97,6 +138,7 @@ export function ProvidersSettings() {
   return (
     <div className="flex flex-col gap-6">
       <DefaultModelSelector
+        key={`${currentModel}:${recentProviderId}:${profiles.length}:${providers.length}`}
         providers={providers}
         profiles={profiles}
         currentModel={currentModel}
@@ -104,6 +146,9 @@ export function ProvidersSettings() {
         onModelSelected={setCurrentModel}
         onConnectProvider={openProvider}
       />
+
+      {loadError && <Alert variant="destructive"><AlertCircle /><AlertTitle>Providers unavailable</AlertTitle><AlertDescription>{loadError}</AlertDescription></Alert>}
+      {loading && <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">Loading connected providers...</CardContent></Card>}
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -125,7 +170,7 @@ export function ProvidersSettings() {
         )}
       </div>
 
-      <ConnectProviderDialog provider={activeProvider} profile={activeProfile} onOpenChange={(open) => !open && setActiveProviderId(null)} onConnected={markConnected} onDisconnected={disconnectProvider} />
+      <ConnectProviderDialog provider={activeProvider} profile={activeProfile} onOpenChange={(open) => !open && setActiveProviderId(null)} onConnected={syncConnectedProvider} onDisconnected={disconnectProviderRemote} />
       <CopilotConnectDialog open={copilotOpen} onOpenChange={setCopilotOpen} existingProfile={copilotProfile} currentModel={currentModel} onConnected={(tokenRef) => markConnected("github-copilot", tokenRef)} onDisconnected={() => disconnectProvider("github-copilot")} onModelSelected={setCurrentModel} />
     </div>
   );
@@ -143,24 +188,43 @@ function DefaultModelSelector({ providers, profiles, currentModel, recentProvide
   const [saving, setSaving] = useState(false);
   const models = selectedProvider?.models || [];
 
-  function refreshModels() {
+  async function refreshModels() {
+    if (!providerId) return;
     setLoadingModels(true);
-    window.setTimeout(() => {
+    try {
+      const response = await fetch("/api/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refresh-models", provider: providerId }),
+      });
+      if (!response.ok) throw new Error("Failed to refresh models");
       setLoadingModels(false);
       toast.success("Model list refreshed");
-    }, 450);
+    } catch (error) {
+      setLoadingModels(false);
+      toast.error(error instanceof Error ? error.message : "Failed to refresh models");
+    }
   }
 
-  function saveDefaultModel() {
+  async function saveDefaultModel() {
     const selectedModelId = modelId || manualModelId.trim();
     if (!providerId || !selectedModelId) return;
     setSaving(true);
-    window.setTimeout(() => {
+    try {
       const spec = `${providerId}/${selectedModelId}`;
+      const response = await fetch("/api/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set-default", model: spec }),
+      });
+      if (!response.ok) throw new Error("Failed to save default model");
       onModelSelected(spec);
       toast.success(`Default model set to ${spec}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save default model");
+    } finally {
       setSaving(false);
-    }, 350);
+    }
   }
 
   return (
@@ -273,32 +337,41 @@ function ProviderCard({ provider, currentModel, profile, onClick }: { provider: 
   );
 }
 
-function ConnectProviderDialog({ provider, profile, onOpenChange, onConnected, onDisconnected }: { provider?: ProviderMeta; profile?: AuthProfile; onOpenChange: (open: boolean) => void; onConnected: (providerId: string, tokenRef: string, baseUrl?: string) => void; onDisconnected: (providerId: string) => void }) {
+function ConnectProviderDialog({ provider, profile, onOpenChange, onConnected, onDisconnected }: { provider?: ProviderMeta; profile?: AuthProfile; onOpenChange: (open: boolean) => void; onConnected: (providerId: string, profile: AuthProfile, models: string[], defaultModel?: string) => void; onDisconnected: (providerId: string) => Promise<void> }) {
   const [keyInput, setKeyInput] = useState("");
   const [baseUrlInput, setBaseUrlInput] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [defaultModel, setDefaultModel] = useState<string | undefined>();
   if (!provider) return null;
-  const models = provider.models || [];
+  const models = discoveredModels.length > 0 ? discoveredModels : provider.models || [];
 
-  function connect() {
+  async function connect() {
     if (!provider || !keyInput.trim()) return;
     setConnecting(true);
     setError(null);
-    window.setTimeout(() => {
-      if (keyInput.trim().length < 8) {
-        setError("Could not validate this API key");
-        setConnecting(false);
-        return;
-      }
-      const tokenRef = `${provider.id}:...${keyInput.trim().slice(-4)}`;
-      onConnected(provider.id, tokenRef, baseUrlInput.trim() || undefined);
+    try {
+      const response = await fetch("/api/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: provider.id, apiKey: keyInput.trim(), baseUrl: baseUrlInput.trim() || undefined }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || "Could not validate this API key");
+      const modelIds = Array.isArray(data.models) ? data.models.map((model: { id?: string }) => model.id).filter(Boolean) : [];
+      setDiscoveredModels(modelIds);
+      setDefaultModel(data.defaultModel);
+      onConnected(provider.id, data.profile, modelIds, data.defaultModel);
       setConnected(true);
-      setConnecting(false);
       toast.success(`${provider.name} connected`);
-    }, 650);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not validate this API key");
+    } finally {
+      setConnecting(false);
+    }
   }
 
   return (
@@ -314,11 +387,11 @@ function ConnectProviderDialog({ provider, profile, onOpenChange, onConnected, o
               <div className="flex flex-col gap-2"><Label>Base URL</Label><Input value={baseUrlInput} onChange={(event) => setBaseUrlInput(event.target.value)} placeholder={provider.defaultBaseUrl || "Optional custom endpoint"} className="h-10 rounded-xl font-mono text-xs" disabled={connecting} /></div>
             </div>
           ) : (
-            <div className="flex flex-col gap-4"><Alert><Check /><AlertTitle>{provider.name} is connected</AlertTitle><AlertDescription>{models.length ? `${models.length} models were discovered. Choose the default model from the top selector.` : "The key was saved, but the provider did not return a model list."}</AlertDescription></Alert>{models.length > 0 && <div className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-lg border border-border p-2">{models.slice(0, 24).map((model) => <div key={model} className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-xs hover:bg-accent"><span className="truncate font-mono">{model}</span>{model === provider.recommendedModel && <Badge variant="secondary" className="rounded-full text-[10px]">Recommended</Badge>}</div>)}</div>}</div>
+            <div className="flex flex-col gap-4"><Alert><Check /><AlertTitle>{provider.name} is connected</AlertTitle><AlertDescription>{models.length ? `${models.length} models were discovered. Choose the default model from the top selector.` : "The key was saved, but the provider did not return a model list."}</AlertDescription></Alert>{models.length > 0 && <div className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-lg border border-border p-2">{models.slice(0, 24).map((model) => <div key={model} className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-xs hover:bg-accent"><span className="truncate font-mono">{model}</span>{(model === defaultModel || model === provider.recommendedModel) && <Badge variant="secondary" className="rounded-full text-[10px]">Recommended</Badge>}</div>)}</div>}</div>
           )}
           {error && <Alert variant="destructive"><AlertCircle /><AlertTitle>Connection failed</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
         </div>
-        <DialogFooter className="mx-0 mb-0 shrink-0 border-t border-border px-6 py-4">{profile && !connected && <Button variant="ghost" onClick={() => { onDisconnected(provider.id); toast.success("Provider disconnected"); onOpenChange(false); }} className="mr-auto gap-2 text-destructive hover:text-destructive"><Trash2 className="size-4" /> Disconnect</Button>}<Button variant="outline" onClick={() => onOpenChange(false)}>{connected ? "Choose default" : "Cancel"}</Button>{!connected && <Button onClick={connect} disabled={connecting || !keyInput.trim()} className="gap-2">{connecting ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Connect and fetch models</Button>}</DialogFooter>
+        <DialogFooter className="mx-0 mb-0 shrink-0 border-t border-border px-6 py-4">{profile && !connected && <Button variant="ghost" onClick={async () => { try { await onDisconnected(provider.id); toast.success("Provider disconnected"); onOpenChange(false); } catch (error) { toast.error(error instanceof Error ? error.message : "Failed to disconnect provider"); } }} className="mr-auto gap-2 text-destructive hover:text-destructive"><Trash2 className="size-4" /> Disconnect</Button>}<Button variant="outline" onClick={() => onOpenChange(false)}>{connected ? "Choose default" : "Cancel"}</Button>{!connected && <Button onClick={connect} disabled={connecting || !keyInput.trim()} className="gap-2">{connecting ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Connect and fetch models</Button>}</DialogFooter>
       </DialogContent>
     </Dialog>
   );

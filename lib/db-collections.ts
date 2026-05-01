@@ -26,5 +26,7 @@ export const collections = {
   jobs: <TSchema extends Document = Document>() => collection<TSchema>("jobs"),
   logs: <TSchema extends Document = Document>() => collection<TSchema>("logs"),
   uploads: <TSchema extends Document = Document>() => collection<TSchema>("uploads"),
+  authProfiles: <TSchema extends Document = Document>() => collection<TSchema>("authProfiles"),
+  userSettings: <TSchema extends Document = Document>() => collection<TSchema>("userSettings"),
   users: <TSchema extends Document = Document>() => collection<TSchema>("users"),
 };

@@ -1,3 +1,6 @@
+"use client";
+
+import { ProviderIcon as LobeProviderIcon } from "@lobehub/icons";
 import { Bot, Cloud, Code2, Globe2, Search, Sparkles, Triangle, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +23,17 @@ const providerClass: Record<string, string> = {
 };
 
 export function ProviderIcon({ provider, className }: { provider: string; className?: string }) {
+  const lobeProvider = provider === "github-copilot" ? "githubcopilot" : provider;
+  const hasLobeIcon = !["maton", "akash"].includes(provider);
+
+  if (hasLobeIcon) {
+    return (
+      <span className={cn("inline-flex size-8 items-center justify-center rounded-lg border border-border bg-background", className)}>
+        <LobeProviderIcon provider={lobeProvider} size={22} type="color" />
+      </span>
+    );
+  }
+
   const Icon =
     provider.includes("github") ? Code2
     : provider === "vercel" ? Triangle

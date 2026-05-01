@@ -94,7 +94,7 @@ export async function POST(req: Request) {
   const modelMessages = await toModelMessages(messages);
 
   const result = streamText({
-    model: getChatModel(),
+    model: await getChatModel(userId),
     system: OPERON_SYSTEM_PROMPT,
     messages: modelMessages,
     stopWhen: stepCountIs(8),
