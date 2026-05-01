@@ -108,40 +108,6 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Conversations */}
-        <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-          <SidebarGroupLabel>Conversations</SidebarGroupLabel>
-          <SidebarGroupContent>
-            {filteredConvs.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-muted-foreground">
-                No conversations yet. Start a new chat to see it here.
-              </p>
-            ) : (
-              <SidebarMenu>
-                {filteredConvs.map((c) => {
-                  const href = `/dashboard/chat?c=${c.id}`;
-                  const active = pathname === "/dashboard/chat" && typeof window !== "undefined" && window.location.search.includes(c.id);
-                  return (
-                    <SidebarMenuItem key={c.id}>
-                      <SidebarMenuButton asChild isActive={active}>
-                        <Link href={href} className="flex items-start gap-2 py-2">
-                          <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", channelDot[c.channel])} />
-                          <span className="flex min-w-0 flex-col">
-                            <span className="truncate text-sm">{c.title}</span>
-                            {c.preview && (
-                              <span className="truncate text-[11px] text-muted-foreground">{c.preview}</span>
-                            )}
-                          </span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            )}
-          </SidebarGroupContent>
-        </SidebarGroup>
-
         {/* Navigation groups */}
         {groups.map(({ key, items }) => (
           <SidebarGroup key={key}>
