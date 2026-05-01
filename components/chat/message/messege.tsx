@@ -12,14 +12,14 @@ import ToolPart from "./parts/tools/tools-show-ui";
 function MessageAvatar({ role }: { role: string }) {
   const isUser = role === "user";
   return (
-    <Avatar className="h-7 w-7 shrink-0 rounded-lg">
+    <Avatar className="h-8 w-8 shrink-0 rounded-xl border border-border/40">
       <AvatarFallback
         className={cn(
-          "rounded-lg text-[11px] font-medium",
-          isUser ? "bg-muted text-foreground/70" : "bg-primary/10 text-primary",
+          "rounded-xl text-[11px] font-semibold",
+          isUser ? "bg-muted text-foreground/80" : "bg-foreground text-background",
         )}
       >
-        {isUser ? "You" : <Sparkles className="h-3.5 w-3.5" />}
+        {isUser ? "U" : <Sparkles className="h-3.5 w-3.5" />}
       </AvatarFallback>
     </Avatar>
   );
@@ -71,23 +71,26 @@ function EmptyState() {
     "Watch BTCUSDT, alert me on a 3% drop",
   ];
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-16 text-center">
-      <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-        <Sparkles className="h-5 w-5" />
+    <div className="flex flex-1 flex-col items-center justify-center gap-8 px-4 py-16 text-center">
+      <div className="relative">
+        <div className="absolute inset-0 animate-ping rounded-full bg-primary/20 opacity-75" />
+        <div className="relative inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-foreground text-background">
+          <Sparkles className="h-6 w-6" />
+        </div>
       </div>
-      <div className="space-y-1">
+      <div className="space-y-2">
         <h2 className="font-heading text-2xl font-semibold tracking-tight">
           What can I do for you today?
         </h2>
-        <p className="text-sm text-muted-foreground">
-          Ask anything. Brilion will pick the right tools and run the steps.
+        <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+          Ask anything. Brilion picks the right tools and runs the steps for you.
         </p>
       </div>
-      <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-2">
         {suggestions.map((s) => (
           <div
             key={s}
-            className="cursor-pointer rounded-xl border border-border bg-card p-3 text-left text-sm text-foreground/80 transition-colors hover:border-foreground/30 hover:bg-muted/50"
+            className="cursor-pointer rounded-xl border border-border/60 bg-card/60 p-3.5 text-left text-sm text-foreground/80 backdrop-blur transition-all hover:border-foreground/30 hover:bg-card hover:shadow-sm"
           >
             {s}
           </div>

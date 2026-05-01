@@ -52,7 +52,7 @@ export default function Input() {
       {attachedFile && (
         <div className="mb-2 inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
           <FileText className="h-4 w-4 text-muted-foreground" />
-          <span className="max-w-[220px] truncate text-xs text-foreground/80">
+          <span className="max-w-55 truncate text-xs text-foreground/80">
             {attachedFile.name}
           </span>
           <button
@@ -68,10 +68,10 @@ export default function Input() {
 
       <div
         className={cn(
-          "flex flex-col gap-2 rounded-3xl border bg-card px-3 py-3 shadow-sm transition-colors",
+          "flex flex-col gap-2.5 rounded-3xl border border-border/80 bg-card px-4 py-3 shadow-sm backdrop-blur transition-colors",
           isStreaming
-            ? "border-border opacity-90"
-            : "border-border focus-within:border-foreground/30",
+            ? "border-border/60 opacity-90"
+            : "focus-within:border-foreground/40",
         )}
       >
         <textarea
@@ -82,7 +82,7 @@ export default function Input() {
           disabled={isStreaming}
           placeholder={isStreaming ? "Brilion is responding…" : "Message Brilion…"}
           rows={1}
-          className="max-h-[200px] w-full resize-none bg-transparent px-1 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed"
+          className="max-h-50 w-full resize-none bg-transparent px-1 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed"
           style={{ scrollbarWidth: "none" }}
         />
 
