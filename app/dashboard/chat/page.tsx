@@ -7,7 +7,6 @@ import type { UIMessage } from "ai";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Sparkles,
-  Copy,
   Check,
   ChevronDown,
   StopCircle,
@@ -34,8 +33,6 @@ import {
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -46,40 +43,12 @@ import { BlurFade } from "@/components/ui/blur-fade";
 import { Ripple } from "@/components/ui/ripple";
 import { ShineBorder } from "@/components/ui/shine-border";
 import { AnimatedShinyText } from "@/components/ui/animated-shiny-text";
+import { ChatMessageList } from "@/components/chat/message/message";
+import type { ChatDisplayMessage } from "@/components/chat/message/types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-// ─── Parse message content — separate text from image/file attachments ───
-const ATTACHMENT_RE = /\[(Image|File):\s*([^\]]+)\]\(([^)]+)\)/g;
-interface ParsedContent {
-  text: string;
-  attachments: { type: "image" | "file"; name: string; url: string }[];
-}
-function parseMessageContent(content: string): ParsedContent {
-  const attachments: ParsedContent["attachments"] = [];
-  const text = content
-    .replace(ATTACHMENT_RE, (_, type, name, url) => {
-      attachments.push({ type: type.toLowerCase() as "image" | "file", name: name.trim(), url });
-      return "";
-    })
-    .trim();
-  return { text, attachments };
-}
-
-interface ToolCallPart {
-  type: "tool-invocation";
-  toolName: string;
-  state: "calling" | "result" | "error";
-  args?: Record<string, unknown>;
-  result?: unknown;
-}
-interface Message {
-  role: "user" | "assistant" | "system";
-  content: string;
-  toolCalls: ToolCallPart[];
-  thinking?: string;
-  createdAt?: string;
-}
+type MessageRole = ChatDisplayMessage["role"];
 
 interface ConversationSummary {
   _id: string;
@@ -125,95 +94,6 @@ interface AttachedFile {
   error?: string;
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-          }}
-          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{copied ? "Copied!" : "Copy"}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-const TOOL_LABELS: Record<string, string> = {
-  tavily_search: "Searching the web",
-  generate_image: "Generating image",
-  generate_video: "Generating video",
-  text_to_speech: "Converting to speech",
-  spawn_subagent: "Delegating to sub-agent",
-  web_request: "Making web request",
-  memory_search: "Searching memory",
-  discover_skills: "Discovering skills",
-};
-
-function ToolCallLog({ toolCalls }: { toolCalls: ToolCallPart[] }) {
-  if (!toolCalls.length) return null;
-  return (
-    <div className="flex flex-col gap-1">
-      {toolCalls.map((tc, idx) => {
-        const isCalling = tc.state === "calling";
-        const hasErr = tc.state === "error";
-        return (
-          <div key={idx} className="flex items-center gap-2 text-xs text-muted-foreground">
-            {isCalling ? (
-              <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
-            ) : hasErr ? (
-              <X className="size-3 shrink-0 text-destructive" />
-            ) : (
-              <Check className="size-3 shrink-0 text-muted-foreground/60" />
-            )}
-            <span className={isCalling ? "text-foreground" : ""}>
-              {TOOL_LABELS[tc.toolName] || tc.toolName}
-              {isCalling ? "…" : ""}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="text-xs">
-      <button
-        onClick={() => setExpanded((e) => !e)}
-        className="flex items-center gap-1.5 py-0.5 text-muted-foreground transition-colors hover:text-foreground"
-      >
-        {isStreaming ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-        ) : (
-          <ChevronRight
-            className={cn(
-              "size-3 shrink-0 transition-transform",
-              expanded && "rotate-90",
-            )}
-          />
-        )}
-        <span className="font-medium">{isStreaming ? "Thinking…" : "Thought for a moment"}</span>
-      </button>
-      {expanded && content && (
-        <div className="ml-4.5 mt-1 border-l-2 border-border/50 pl-3">
-          <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground/80">
-            {content}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function formatTimeAgo(dateStr: string): string {
   const now = Date.now();
@@ -252,8 +132,8 @@ function ChatPage() {
 
   const isLoading = status === "submitted" || status === "streaming";
 
-  // Map UIMessage[] → our Message[] for rendering
-  const messages: Message[] = chatMessages.map((m: UIMessage) => {
+  // Map UIMessage[] → display messages for rendering.
+  const messages: ChatDisplayMessage[] = chatMessages.map((m: UIMessage) => {
     const parts = (m as UIMessage).parts || [];
     const textParts = parts.filter((p: { type: string }) => p.type === "text");
     const reasoningParts = parts.filter((p: { type: string }) =>
@@ -263,7 +143,7 @@ function ChatPage() {
       p.type.startsWith("tool-") || p.type === "tool-invocation",
     );
     return {
-      role: m.role as Message["role"],
+      role: m.role as MessageRole,
       content: textParts.map((p) => (p as { text?: string }).text || "").join(""),
       thinking:
         reasoningParts
@@ -280,7 +160,7 @@ function ChatPage() {
         return {
           type: "tool-invocation" as const,
           toolName: pp.toolName || "tool",
-          state: isDone ? ("result" as const) : ("calling" as const),
+          state: isDone ? ("output-available" as const) : ("calling" as const),
           args: pp.input,
           result: pp.output,
         };
@@ -1341,135 +1221,7 @@ function ChatPage() {
               </div>
             )}
 
-            <div className="flex flex-col gap-2 pb-4">
-              {messages.map((msg, i) => {
-                if (msg.role === "system") {
-                  return (
-                    <div key={i} className="flex justify-center py-1">
-                      <span className="rounded-full bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground">
-                        {msg.content}
-                      </span>
-                    </div>
-                  );
-                }
-
-                const isUser = msg.role === "user";
-                const hasToolCalls = msg.toolCalls?.length > 0;
-                const derivedThinking =
-                  !msg.thinking && hasToolCalls
-                    ? msg.toolCalls
-                        .filter((tc) => tc.state === "calling")
-                        .map((tc) => TOOL_LABELS[tc.toolName] || tc.toolName)
-                        .join(" | ")
-                    : undefined;
-                const parsedUserMessage = isUser ? parseMessageContent(msg.content) : null;
-
-                if (isUser) {
-                  const { text, attachments } = parsedUserMessage || { text: "", attachments: [] };
-                  return (
-                    <div key={i} className="group flex flex-col items-end gap-1.5 py-2">
-                      {attachments.length > 0 && (
-                        <div className="flex max-w-[80%] flex-wrap justify-end gap-2">
-                          {attachments.map((att, ai) =>
-                            att.type === "image" ? (
-                              <a
-                                key={ai}
-                                href={att.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block overflow-hidden rounded-2xl"
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={att.url}
-                                  alt={att.name}
-                                  className="max-h-64 max-w-64 rounded-2xl object-cover"
-                                />
-                              </a>
-                            ) : (
-                              <a
-                                key={ai}
-                                href={att.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-2 rounded-xl bg-secondary px-3 py-2 text-xs text-secondary-foreground transition-colors hover:bg-accent"
-                              >
-                                <FileIcon className="size-3.5" />
-                                <span className="max-w-40 truncate">{att.name}</span>
-                              </a>
-                            ),
-                          )}
-                        </div>
-                      )}
-                      {text && (
-                        <div className="max-w-[80%] rounded-3xl bg-secondary px-4 py-2.5">
-                          <p className="whitespace-pre-wrap wrap-break-word text-[14.5px] leading-relaxed text-foreground">
-                            {text}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-
-                return (
-                  <div key={i} className="group flex max-w-3xl items-start gap-3 py-3">
-                    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary">
-                      <Sparkles className="size-3.5 text-primary-foreground" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="space-y-2">
-                        {(msg.thinking || derivedThinking) && (
-                          <ThinkingBlock
-                            content={msg.thinking || `Working on: ${derivedThinking}`}
-                            isStreaming={isLoading && i === messages.length - 1 && !msg.content}
-                          />
-                        )}
-                        {hasToolCalls && <ToolCallLog toolCalls={msg.toolCalls} />}
-                        {msg.content ? (
-                          <div className="prose prose-sm max-w-none wrap-break-word leading-relaxed text-foreground prose-headings:font-heading prose-headings:text-foreground prose-p:my-1.5 prose-code:rounded-md prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[13px] prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none prose-pre:my-2 prose-pre:rounded-xl prose-pre:bg-muted prose-pre:text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                            <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
-                          </div>
-                        ) : isLoading && i === messages.length - 1 ? (
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <div className="flex gap-1">
-                              <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:0ms]" />
-                              <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:150ms]" />
-                              <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:300ms]" />
-                            </div>
-                            <span className="text-xs">{hasToolCalls ? "Working…" : "Thinking…"}</span>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {msg.content && (
-                        <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                          <CopyButton text={msg.content} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {isLoading && messages[messages.length - 1]?.role === "user" && (
-                <BlurFade delay={0.05} direction="up">
-                  <div className="flex max-w-3xl items-start gap-3 py-3">
-                    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary">
-                      <Sparkles className="size-3.5 text-primary-foreground" />
-                    </div>
-                    <div className="flex items-center gap-2 pt-1">
-                      <div className="flex gap-1">
-                        <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:0ms]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:150ms]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:300ms]" />
-                      </div>
-                      <AnimatedShinyText className="text-xs">Thinking…</AnimatedShinyText>
-                    </div>
-                  </div>
-                </BlurFade>
-              )}
-            </div>
+            <ChatMessageList messages={messages} isLoading={isLoading} />
 
             <div ref={messagesEndRef} className="h-px" aria-hidden="true" />
           </div>
