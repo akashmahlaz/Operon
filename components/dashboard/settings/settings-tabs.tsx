@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 export function SettingsTabs() {
   const pathname = usePathname();
   return (
-    <nav className="flex flex-wrap items-center gap-1 rounded-xl border border-border bg-muted/30 p-1">
+    <nav className="mx-auto flex max-w-5xl gap-1 px-4 lg:px-6">
       {settingsTabs.map((tab) => {
         const Icon = tab.icon;
         const active = pathname.startsWith(tab.href);
@@ -17,17 +17,14 @@ export function SettingsTabs() {
             key={tab.id}
             href={tab.href}
             className={cn(
-              "flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+              "group relative -mb-px flex items-center gap-2 border-b-2 px-3 py-3 text-sm transition-colors",
               active
-                ? "bg-background text-foreground shadow-sm"
+                ? "border-primary font-medium text-foreground"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
             <Icon className="size-4" />
-            <span className="font-medium">{tab.label}</span>
-            <span className="hidden text-[11px] text-muted-foreground/80 lg:inline">
-              {tab.description}
-            </span>
+            {tab.label}
           </Link>
         );
       })}
