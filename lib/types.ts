@@ -8,10 +8,13 @@ export type Channel = "web" | "whatsapp" | "telegram";
 
 export interface ConversationSummary {
   id: string;
+  _id?: string;
   title: string;
   channel: Channel;
   preview?: string;
+  lastMessage?: string | null;
   messageCount: number;
+  createdAt?: string;
   updatedAt: string; // ISO
 }
 
@@ -19,12 +22,26 @@ export type MessageRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {
   id: string;
+  _id?: string;
   conversationId: string;
   role: MessageRole;
+  content: string;
   // We persist the full v6 UIMessage `parts` payload so tool-calls / reasoning
   // can be re-hydrated on reload.
   parts: unknown[];
   createdAt: string;
+}
+
+export interface ConversationDetail {
+  _id: string;
+  title: string;
+  channel: Channel;
+  lastMessage: string | null;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+  userId: string;
+  messages: ChatMessage[];
 }
 
 export interface Skill {

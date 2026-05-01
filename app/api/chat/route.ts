@@ -2,30 +2,10 @@ import { streamText, type UIMessage, type ModelMessage } from "ai";
 import { minimax } from "vercel-minimax-ai-provider";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { appendMessage, createConversation, deleteConversation, getConversation, listConversations } from "@/lib/services/chat-store";
+import type { Channel } from "@/lib/types";
 
 export const maxDuration = 60;
-
-type Msg = {
-  role: "user" | "assistant" | "system";
-  content: string;
-  createdAt: string;
-  parts?: unknown[];
-};
-type Conv = {
-  _id: string;
-  title: string;
-  channel: "web" | "whatsapp" | "telegram";
-  lastMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-  messages: Msg[];
-  userId: string;
-};
-
-declare global {
-  var __operon_convs: Map<string, Conv> | undefined;
-}
-const store: Map<string, Conv> = (globalThis.__operon_convs ??= new Map());
 
 async function userIdOf(): Promise<string> {
   const session = await auth();
@@ -33,10 +13,11 @@ async function userIdOf(): Promise<string> {
   return (session.user as { id?: string }).id || session.user.email || "anon";
 }
 
-function summary(c: Conv) {
-  const { messages: _m, ...rest } = c;
-  void _m;
-  return rest;
+function textFromParts(parts: UIMessage["parts"] | undefined) {
+  return (parts || [])
+    .filter((part) => (part as { type?: string }).type === "text")
+    .map((part) => (part as { text?: string }).text || "")
+    .join("");
 }
 
 export async function GET(req: Request) {
@@ -45,35 +26,23 @@ export async function GET(req: Request) {
   const id = url.searchParams.get("id");
 
   if (id) {
-    const conv = store.get(id);
-    if (!conv || conv.userId !== userId)
+    const conv = await getConversation(id, userId);
+    if (!conv)
       return NextResponse.json({ error: "not found" }, { status: 404 });
     return NextResponse.json(conv);
   }
 
-  const list = [...store.values()]
-    .filter((c) => c.userId === userId)
-    .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt))
-    .map(summary);
-  return NextResponse.json(list);
+  return NextResponse.json(await listConversations(userId));
 }
 
 export async function PUT(req: Request) {
   const userId = await userIdOf();
   const body = await req.json().catch(() => ({}));
-  const now = new Date().toISOString();
-  const id = crypto.randomUUID();
-  const conv: Conv = {
-    _id: id,
-    title: body?.title || "New Chat",
-    channel: body?.channel || "web",
-    lastMessage: null,
-    createdAt: now,
-    updatedAt: now,
-    messages: [],
+  const conv = await createConversation({
     userId,
-  };
-  store.set(id, conv);
+    title: typeof body?.title === "string" ? body.title : "New Chat",
+    channel: typeof body?.channel === "string" ? (body.channel as Channel) : "web",
+  });
   return NextResponse.json(conv);
 }
 
@@ -82,8 +51,7 @@ export async function DELETE(req: Request) {
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-  const conv = store.get(id);
-  if (conv && conv.userId === userId) store.delete(id);
+  await deleteConversation(id, userId);
   return NextResponse.json({ ok: true });
 }
 
@@ -94,48 +62,30 @@ export async function POST(req: Request) {
   const userId = await userIdOf();
 
   if (conversationId) {
-    const conv = store.get(conversationId);
-    if (conv && conv.userId === userId) {
-      const last = messages[messages.length - 1];
-      if (last?.role === "user") {
-        const text = (last.parts || [])
-          .filter((p) => (p as { type?: string }).type === "text")
-          .map((p) => (p as { text?: string }).text || "")
-          .join("");
-        conv.messages.push({
-          role: "user",
-          content: text,
-          createdAt: new Date().toISOString(),
-          parts: last.parts as unknown[],
-        });
-        conv.lastMessage = text.slice(0, 140);
-        conv.updatedAt = new Date().toISOString();
-        if (conv.title === "New Chat" && text) conv.title = text.slice(0, 60);
-      }
+    const last = messages[messages.length - 1];
+    if (last?.role === "user") {
+      const text = textFromParts(last.parts);
+      await appendMessage(conversationId, userId, {
+        role: "user",
+        content: text,
+        createdAt: new Date().toISOString(),
+        parts: last.parts as unknown[],
+      });
     }
   }
 
   // Manually convert UIMessage[] to ModelMessage[] to avoid convertToModelMessages type issues.
   const modelMessages: ModelMessage[] = messages.map((m: UIMessage) => {
     if (m.role === "system") {
-      const text = (m.parts || [])
-        .filter((p) => (p as { type?: string }).type === "text")
-        .map((p) => (p as { text?: string }).text || "")
-        .join("");
+      const text = textFromParts(m.parts);
       return { role: "system" as const, content: text };
     }
     if (m.role === "user") {
-      const text = (m.parts || [])
-        .filter((p) => (p as { type?: string }).type === "text")
-        .map((p) => (p as { text?: string }).text || "")
-        .join("");
+      const text = textFromParts(m.parts);
       return { role: "user" as const, content: text };
     }
     // assistant
-    const text = (m.parts || [])
-      .filter((p) => (p as { type?: string }).type === "text")
-      .map((p) => (p as { text?: string }).text || "")
-      .join("");
+    const text = textFromParts(m.parts);
     return { role: "assistant" as const, content: text };
   });
 
@@ -149,15 +99,12 @@ export async function POST(req: Request) {
     messages: modelMessages,
     onFinish: async ({ text }) => {
       if (!conversationId) return;
-      const conv = store.get(conversationId);
-      if (!conv || conv.userId !== userId) return;
-      conv.messages.push({
+      await appendMessage(conversationId, userId, {
         role: "assistant",
         content: text,
         createdAt: new Date().toISOString(),
+        parts: [{ type: "text", text }],
       });
-      conv.lastMessage = text.slice(0, 140);
-      conv.updatedAt = new Date().toISOString();
     },
   });
 

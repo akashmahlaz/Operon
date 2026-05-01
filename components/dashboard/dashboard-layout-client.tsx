@@ -4,20 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import {
-  MessageSquare,
-  Settings,
-  Sparkles,
-  LogOut,
-  PanelLeftClose,
-  PanelLeft,
-  Bot,
-  Wrench,
-  Plug,
-  Calendar,
-  History,
-  ScrollText,
-} from "lucide-react";
+import { LogOut, PanelLeft, PanelLeftClose, Sparkles } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -32,29 +19,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  allDashboardSections,
+  primaryDashboardSections,
+  settingsDashboardSection,
+} from "@/components/dashboard/dashboard-sections";
 import { cn } from "@/lib/utils";
-
-// Section brand colors
-const SECTION_COLORS: Record<string, { bg: string; text: string }> = {
-  chat: { bg: "bg-primary/8", text: "text-primary" },
-  agents: { bg: "bg-violet-500/8", text: "text-violet-500" },
-  skills: { bg: "bg-amber-500/8", text: "text-amber-500" },
-  integrations: { bg: "bg-emerald-500/8", text: "text-emerald-500" },
-  scheduler: { bg: "bg-sky-500/8", text: "text-sky-500" },
-  sessions: { bg: "bg-pink-500/8", text: "text-pink-500" },
-  logs: { bg: "bg-orange-500/8", text: "text-orange-500" },
-  settings: { bg: "bg-muted/8", text: "text-muted-foreground" },
-};
-
-const SECTIONS = [
-  { id: "chat", icon: MessageSquare, label: "Chat", href: "/dashboard/chat" },
-  { id: "agents", icon: Bot, label: "Agents", href: "/dashboard/agents" },
-  { id: "skills", icon: Wrench, label: "Skills", href: "/dashboard/skills" },
-  { id: "integrations", icon: Plug, label: "Integrations", href: "/dashboard/integrations" },
-  { id: "scheduler", icon: Calendar, label: "Scheduler", href: "/dashboard/scheduler" },
-  { id: "sessions", icon: History, label: "Sessions", href: "/dashboard/sessions" },
-  { id: "logs", icon: ScrollText, label: "Logs", href: "/dashboard/logs" },
-] as const;
 
 interface DashboardLayoutClientProps {
   user?: { name?: string | null; email?: string | null; image?: string | null };
@@ -65,20 +35,54 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
   const pathname = usePathname();
   const router = useRouter();
   const [expanded, setExpanded] = useState(true);
+  const SettingsIcon = settingsDashboardSection.icon;
 
   const isSettings = pathname.startsWith("/dashboard/settings");
   const activeSection = isSettings
     ? "settings"
-    : SECTIONS.find((s) => pathname.startsWith(s.href))?.id ?? "chat";
+    : allDashboardSections.find((s) => pathname.startsWith(s.href))?.id ?? "chat";
+
+  const renderNavItem = (section: (typeof allDashboardSections)[number]) => {
+    const isActive = activeSection === section.id;
+    const Icon = section.icon;
+    return (
+      <Tooltip key={section.id} delayDuration={0}>
+        <TooltipTrigger asChild>
+          <Link
+            href={section.href}
+            className={cn(
+              "relative flex items-center gap-2.5 rounded-xl transition-all duration-200",
+              expanded ? "px-3 py-2.5" : "size-10 justify-center",
+              isActive
+                ? `${section.bg} ${section.text}`
+                : "text-muted-foreground hover:text-foreground hover:bg-accent"
+            )}
+          >
+            <Icon className="size-4.5 shrink-0" />
+            {expanded && (
+              <span className={cn("text-[13px]", isActive ? "font-semibold" : "font-medium")}>
+                {section.label}
+              </span>
+            )}
+          </Link>
+        </TooltipTrigger>
+        {!expanded && (
+          <TooltipContent side="right" sideOffset={8} className="font-medium">
+            {section.label}
+          </TooltipContent>
+        )}
+      </Tooltip>
+    );
+  };
 
   return (
     <TooltipProvider>
-    <div className="flex h-dvh bg-background">
+      <div className="flex h-dvh bg-background">
       {/* Main Sidebar */}
       <nav
         className={cn(
           "flex shrink-0 flex-col border-r border-border bg-sidebar backdrop-blur-xl transition-all duration-300 ease-out",
-          expanded ? "w-52" : "w-15"
+          expanded ? "w-57" : "w-20"
         )}
       >
         {/* Logo + expand toggle */}
@@ -126,49 +130,8 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
         )}
 
         {/* Navigation */}
-        <div
-          className={cn(
-            "flex flex-1 flex-col gap-1",
-            expanded ? "px-2" : "items-center"
-          )}
-        >
-          {SECTIONS.map((s) => {
-            const isActive = activeSection === s.id;
-            const colors = SECTION_COLORS[s.id] || SECTION_COLORS.chat;
-            return (
-              <Tooltip key={s.id} delayDuration={0}>
-                <TooltipTrigger asChild>
-                  <Link
-                    href={s.href}
-                    className={cn(
-                      "relative flex items-center gap-2.5 rounded-xl transition-all duration-200",
-                      expanded ? "px-3 py-2.5" : "size-10 justify-center",
-                      isActive
-                        ? `${colors.bg} ${colors.text}`
-                        : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                    )}
-                  >
-                    <s.icon className="size-4.5 shrink-0" />
-                    {expanded && (
-                      <span
-                        className={cn(
-                          "text-[13px]",
-                          isActive ? "font-semibold" : "font-medium"
-                        )}
-                      >
-                        {s.label}
-                      </span>
-                    )}
-                  </Link>
-                </TooltipTrigger>
-                {!expanded && (
-                  <TooltipContent side="right" sideOffset={8} className="font-medium">
-                    {s.label}
-                  </TooltipContent>
-                )}
-              </Tooltip>
-            );
-          })}
+        <div className={cn("flex flex-1 flex-col gap-1", expanded ? "px-2" : "items-center")}>
+          {primaryDashboardSections.map(renderNavItem)}
         </div>
 
         {/* Bottom: Settings + User */}
@@ -190,7 +153,7 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
                     : "text-muted-foreground hover:text-foreground hover:bg-accent"
                 )}
               >
-                <Settings className="size-4.5 shrink-0" />
+                <SettingsIcon className="size-4.5 shrink-0" />
                 {expanded && (
                   <span className="text-[13px] font-medium">Settings</span>
                 )}
@@ -249,7 +212,7 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <Link href="/dashboard/settings" className="gap-2">
-                    <Settings className="size-3.5" /> Settings
+                    <SettingsIcon className="size-3.5" /> Settings
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -272,7 +235,7 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
       <div className="flex flex-1 overflow-hidden">
         {children}
       </div>
-    </div>
+      </div>
     </TooltipProvider>
   );
 }

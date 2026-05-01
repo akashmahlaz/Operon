@@ -476,10 +476,12 @@ function ChatPage() {
       setActiveChannel(data.channel || "web");
       const loaded: UIMessage[] = (data.messages || [])
         .filter((m: { role: string; content?: string }) => m.role !== "system" || m.content)
-        .map((m: { role: string; content: string; createdAt?: string }, i: number) => ({
-          id: String(i),
+        .map((m: { _id?: string; role: string; content: string; parts?: unknown[] }, i: number) => ({
+          id: m._id ?? String(i),
           role: m.role as "user" | "assistant",
-          parts: [{ type: "text" as const, text: m.content || "" }],
+          parts: Array.isArray(m.parts) && m.parts.length > 0
+            ? (m.parts as UIMessage["parts"])
+            : [{ type: "text" as const, text: m.content || "" }],
         }));
       setChatMessages(loaded);
       requestAnimationFrame(() => scrollToBottom(true));
