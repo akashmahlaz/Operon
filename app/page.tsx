@@ -5,7 +5,7 @@ import { HowItWorks } from "@/components/landing/how-it-works";
 import { Pricing } from "@/components/landing/pricing";
 import { MarketingFooter } from "@/components/landing/footer";
 
-export default function HomePage() {
+export default function Page() {
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar/>
