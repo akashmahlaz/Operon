@@ -11,7 +11,7 @@ export function Hero() {
         className="pointer-events-none absolute inset-0 -z-10 opacity-70"
         style={{
           background:
-            "radial-gradient(60% 50% at 30% 20%, oklch(0.92 0.06 75 / 0.5), transparent), radial-gradient(50% 40% at 80% 10%, oklch(0.9 0.08 30 / 0.4), transparent), radial-gradient(60% 50% at 50% 90%, oklch(0.93 0.05 230 / 0.4), transparent)",
+            "radial-gradient(60% 50% at 30% 20%, color-mix(in oklab, var(--teal) 30%, transparent), transparent), radial-gradient(50% 40% at 80% 10%, color-mix(in oklab, var(--coral) 28%, transparent), transparent), radial-gradient(60% 50% at 50% 90%, color-mix(in oklab, var(--success) 22%, transparent), transparent)",
         }}
       />
 

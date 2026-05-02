@@ -591,7 +591,7 @@ function ChatPage() {
       {/* ════════ MIDDLE COLUMN — Conversation list ════════ */}
       <div
         className={cn(
-          "hidden shrink-0 flex-col border-r border-border bg-secondary/40 transition-all duration-300 ease-out md:flex",
+          "hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-out md:flex",
           panelOpen ? "w-72" : "w-0 overflow-hidden border-r-0",
         )}
       >

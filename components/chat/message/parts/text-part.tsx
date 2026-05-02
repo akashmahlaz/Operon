@@ -12,8 +12,8 @@ export function TextPart({ text, isUser }: TextPartProps) {
 
   if (isUser) {
     return (
-      <div className="max-w-[80%] rounded-3xl bg-secondary px-4 py-2.5">
-        <p className="whitespace-pre-wrap wrap-break-word text-[14.5px] leading-relaxed text-foreground">
+      <div className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+        <p className="whitespace-pre-wrap wrap-break-word text-[14.5px] leading-relaxed">
           {text}
         </p>
       </div>

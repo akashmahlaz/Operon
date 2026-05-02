@@ -25,7 +25,7 @@ export function FilePart({ attachment }: { attachment: ParsedAttachment }) {
       href={attachment.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-2 rounded-xl bg-secondary px-3 py-2 text-xs text-secondary-foreground transition-colors hover:bg-accent"
+      className="inline-flex items-center gap-2 rounded-xl bg-muted px-3 py-2 text-xs text-foreground transition-colors hover:bg-muted/70"
     >
       <FileIcon className="size-3.5" />
       <span className="max-w-40 truncate">{attachment.name}</span>

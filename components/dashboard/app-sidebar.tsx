@@ -15,6 +15,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -32,10 +33,61 @@ import { dashboardNav } from "@/lib/nav";
 import type { ConversationSummary } from "@/lib/types";
 import { Plus, Search, LogOut, Settings, User, MoreHorizontal, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
+import { cn } from "@/lib/utils";
 
 interface AppSidebarProps {
   conversations?: ConversationSummary[];
   user?: { name?: string | null; email?: string | null; image?: string | null };
+}
+
+const SIDEBAR_HINT_KEY = "operon-sidebar-hint-seen";
+
+function SidebarShortcutHint() {
+  const { toggleSidebar, open } = useSidebar();
+  const [firstTime, setFirstTime] = React.useState(false);
+
+  React.useEffect(() => {
+    try {
+      if (!localStorage.getItem(SIDEBAR_HINT_KEY)) setFirstTime(true);
+    } catch {}
+  }, []);
+
+  if (!open) return null;
+
+  const markSeen = () => {
+    if (firstTime) {
+      setFirstTime(false);
+      try {
+        localStorage.setItem(SIDEBAR_HINT_KEY, "1");
+      } catch {}
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 px-3 py-2">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+        Shortcut
+      </p>
+      <button
+        type="button"
+        onClick={() => {
+          markSeen();
+          toggleSidebar();
+        }}
+        className={cn(
+          "inline-flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors",
+          firstTime
+            ? "animate-pulse border border-primary/20 bg-primary/10 text-primary"
+            : "bg-muted/50 text-muted-foreground hover:bg-muted",
+        )}
+      >
+        <kbd className="inline-flex items-center justify-center rounded border border-border/60 bg-background px-1 py-0.5 font-mono text-[10px] leading-none">
+          S
+        </kbd>
+        <span>Toggle sidebar</span>
+      </button>
+    </div>
+  );
 }
 
 const groupLabels: Record<string, string> = {
@@ -133,6 +185,7 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter>
+        <SidebarShortcutHint />
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>

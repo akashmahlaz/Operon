@@ -81,8 +81,9 @@ function ReasoningDropdown({
         <Button
           type="button"
           variant="ghost"
+          size="sm"
           disabled={disabled}
-          className="h-8 gap-1.5 rounded-md px-2 text-xs hover:bg-black/10 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0 dark:hover:bg-white/10"
+          className="gap-1.5 px-2"
         >
           <BrainCircuit className="size-3.5 text-muted-foreground" />
           <span className="hidden sm:inline">{selected.label}</span>
@@ -148,13 +149,26 @@ export default function AI_Input_Search({
         submit();
       }}
     >
-      <div className="rounded-2xl bg-black/5 p-1.5 pt-3 shadow-sm ring-1 ring-black/10 dark:bg-white/5 dark:ring-white/10">
-        <div className="mx-2 mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+      <div className="rounded-md border border-border bg-card shadow-xs">
+        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
           <div className="flex min-w-0 items-center gap-2">
-            <OperonMark className="size-4 rounded-md" />
-            <span className="truncate">Operon chat</span>
+            <OperonMark className="size-4 rounded-sm" />
+            <span className="truncate font-medium text-foreground">Operon</span>
+            <span className="flex items-center gap-1 text-[10px]">
+              {isLoading ? (
+                <>
+                  <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+                  <span>Thinking…</span>
+                </>
+              ) : (
+                <>
+                  <span className="size-1.5 rounded-full bg-muted-foreground/40" />
+                  <span>Ready</span>
+                </>
+              )}
+            </span>
           </div>
-          <span className="hidden shrink-0 sm:inline">Streaming with reasoning</span>
+          <span className="hidden shrink-0 sm:inline">Enter to send · Shift+Enter newline</span>
         </div>
 
         <div className="relative flex flex-col">
@@ -166,7 +180,7 @@ export default function AI_Input_Search({
               disabled={disabled || isLoading}
               placeholder={placeholder}
               rows={1}
-              className="min-h-18 w-full resize-none rounded-xl rounded-b-none border-0 bg-black/5 px-4 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed dark:bg-white/5"
+              className="min-h-18 w-full resize-none rounded-none border-0 bg-transparent px-3 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed"
               onChange={(event) => {
                 onChange(event.target.value);
                 adjustHeight();
@@ -180,16 +194,16 @@ export default function AI_Input_Search({
             />
           </div>
 
-          <div className="flex h-14 items-center rounded-b-xl bg-black/5 dark:bg-white/5">
-            <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex items-center justify-between gap-2 border-t border-border px-2 py-2">
+              <div className="flex min-w-0 items-center gap-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       type="button"
                       variant="ghost"
+                      size="sm"
                       disabled={disabled || isLoading || models.length === 0}
-                      className="h-8 max-w-52 gap-1 rounded-md pl-1.5 pr-2 text-xs hover:bg-black/10 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0 dark:hover:bg-white/10"
+                      className="max-w-52 gap-1.5 px-2"
                     >
                       <AnimatePresence mode="wait">
                         <motion.span
@@ -229,7 +243,7 @@ export default function AI_Input_Search({
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <div className="h-4 w-px bg-black/10 dark:bg-white/10" />
+                <div className="h-4 w-px bg-border" />
 
                 <ReasoningDropdown
                   value={reasoningLevel}
@@ -240,15 +254,16 @@ export default function AI_Input_Search({
                 {onAttach && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         aria-label="Attach file"
                         onClick={onAttach}
                         disabled={disabled || isLoading}
-                        className="flex size-8 items-center justify-center rounded-lg bg-black/5 text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 dark:bg-white/5 dark:hover:bg-white/10"
                       >
                         <Paperclip className="size-4" />
-                      </button>
+                      </Button>
                     </TooltipTrigger>
                     <TooltipContent side="top">Attach file</TooltipContent>
                   </Tooltip>
@@ -258,29 +273,31 @@ export default function AI_Input_Search({
               {isLoading ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
+                      size="sm"
                       aria-label="Stop generating"
                       onClick={onStop}
-                      className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-black/5 text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground dark:bg-white/5 dark:hover:bg-white/10"
                     >
-                      <StopCircle className="size-4" />
-                    </button>
+                      <StopCircle className="size-3.5" />
+                      Stop
+                    </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top">Stop generating</TooltipContent>
                 </Tooltip>
               ) : (
-                <button
+                <Button
                   type="submit"
+                  size="sm"
                   aria-label="Send message"
                   disabled={disabled || !value.trim()}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-black/5 text-foreground transition-colors hover:bg-black/10 disabled:text-muted-foreground disabled:opacity-50 dark:bg-white/5 dark:hover:bg-white/10"
                 >
-                  <ArrowRight className={cn("size-4 transition-opacity", value.trim() ? "opacity-100" : "opacity-35")} />
-                </button>
+                  Send
+                  <ArrowRight className="size-3.5" />
+                </Button>
               )}
             </div>
-          </div>
         </div>
       </div>
     </form>
