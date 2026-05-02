@@ -608,23 +608,24 @@ function ChatPage() {
       <div
         className={cn(
           "hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-out md:flex",
-          panelOpen ? "w-72" : "w-0 overflow-hidden border-r-0",
+          panelOpen ? "w-[260px]" : "w-0 overflow-hidden border-r-0",
         )}
       >
-        <div className="shrink-0 space-y-2 p-3">
-          <div className="flex items-center gap-2">
+        {/* Header */}
+        <div className="shrink-0 space-y-2 px-3 pb-2 pt-3">
+          <div className="flex items-center justify-between gap-1.5">
             <button
               onClick={startNewChat}
-              className="flex flex-1 items-center justify-center gap-2 rounded-full bg-primary px-3 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 active:scale-[0.98]"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-[13px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 active:scale-[0.98]"
             >
-              <Plus className="size-4" />
+              <Plus className="size-3.5" />
               New Chat
             </button>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setPanelOpen(false)}
-                  className="shrink-0 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   <PanelLeftClose className="size-4" />
                 </button>
@@ -633,78 +634,87 @@ function ChatPage() {
             </Tooltip>
           </div>
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search chats…"
+              placeholder="Search…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl border border-border bg-card py-2 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus:border-ring focus:outline-none"
+              className="h-8 w-full rounded-lg border border-border/60 bg-muted/40 py-1.5 pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground/70 transition-colors focus:border-primary/30 focus:bg-background focus:outline-none"
             />
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {/* List */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {filteredConversations.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
-              <MessageSquare className="mb-2 size-8 text-muted-foreground/40" />
-              <p className="text-xs text-muted-foreground">
-                {searchQuery ? "No chats match your search" : "No conversations yet"}
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
+              <div className="flex size-10 items-center justify-center rounded-xl bg-muted/60">
+                <MessageSquare className="size-4.5 text-muted-foreground/50" />
+              </div>
+              <p className="text-[12.5px] font-medium text-muted-foreground">
+                {searchQuery ? "No matching chats" : "No chats yet"}
               </p>
+              {!searchQuery && (
+                <p className="text-[11px] text-muted-foreground/60">Start a new conversation above</p>
+              )}
             </div>
           ) : (
-            <div className="space-y-4 pt-2">
+            <div className="space-y-3 pt-1.5">
               {groupOrder.map((group) => {
                 if (!groupedConversations[group] || groupedConversations[group].length === 0)
                   return null;
                 return (
-                  <div key={group} className="space-y-0.5">
-                    <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <div key={group}>
+                    <p className="mb-1 px-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/50">
                       {group}
-                    </div>
-                    {groupedConversations[group].map((c) => {
-                      const isActive = conversationId === c._id;
-                      const meta = CHANNEL_META[c.channel] || CHANNEL_META.web;
-                      return (
-                        <button
-                          key={c._id}
-                          onClick={() => router.push(`/dashboard/chat?id=${c._id}`)}
-                          className={cn(
-                            "group w-full rounded-xl px-2.5 py-2.5 text-left transition-all",
-                            isActive
-                              ? "border border-border/60 bg-background shadow-sm"
-                              : "hover:bg-background/60",
-                          )}
-                        >
-                          <div className="flex items-start gap-2">
-                            <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", meta.dotColor)} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="truncate text-[13px] font-medium text-foreground">
-                                  {c.title || "Untitled"}
-                                </span>
-                                <span className="shrink-0 text-[10px] text-muted-foreground">
-                                  {formatTimeAgo(c.updatedAt)}
-                                </span>
+                    </p>
+                    <div className="space-y-0.5">
+                      {groupedConversations[group].map((c) => {
+                        const isActive = conversationId === c._id;
+                        return (
+                          <button
+                            key={c._id}
+                            onClick={() => router.push(`/dashboard/chat?id=${c._id}`)}
+                            className={cn(
+                              "group relative w-full rounded-lg px-2.5 py-2 text-left transition-all",
+                              isActive
+                                ? "bg-primary/8 text-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.75 before:rounded-r-full before:bg-primary"
+                                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                            )}
+                          >
+                            <div className="flex min-w-0 items-start gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className={cn(
+                                    "truncate text-[12.5px]",
+                                    isActive ? "font-semibold text-foreground" : "font-medium"
+                                  )}>
+                                    {c.title || "Untitled"}
+                                  </span>
+                                  <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                                    {formatTimeAgo(c.updatedAt)}
+                                  </span>
+                                </div>
+                                {c.lastMessage && (
+                                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground/70">
+                                    {c.lastMessage}
+                                  </p>
+                                )}
                               </div>
-                              {c.lastMessage && (
-                                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                                  {c.lastMessage}
-                                </p>
-                              )}
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => deleteConversation(c._id, e)}
+                                className="mt-0.5 shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/30 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                              >
+                                <Trash2 className="size-3" />
+                              </div>
                             </div>
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              onClick={(e) => deleteConversation(c._id, e)}
-                              className="mt-0.5 cursor-pointer p-0.5 text-muted-foreground/40 opacity-0 transition-all hover:text-destructive group-hover:opacity-100"
-                            >
-                              <Trash2 className="size-3" />
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
