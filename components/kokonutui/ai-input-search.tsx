@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 
-import { ArrowRight, Bot, BrainCircuit, Check, ChevronDown, Paperclip, StopCircle } from "lucide-react";
+import { ProviderIcon as LobeProviderIcon } from "@lobehub/icons";
+import { ArrowUp, Bot, BrainCircuit, Check, ChevronDown, Paperclip, Square } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect } from "react";
-import { OperonMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -41,69 +41,43 @@ interface AIInputSearchProps {
   onReasoningLevelChange: (level: ReasoningLevel) => void;
 }
 
-const reasoningOptions: Array<{ value: ReasoningLevel; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-];
+const reasoningLabels: Record<ReasoningLevel, string> = {
+  auto: "Adaptive",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
 
-function providerGlyph(model: string) {
-  const lower = model.toLowerCase();
-  if (lower.includes("operon")) return <OperonMark className="size-4 rounded-md" />;
-  if (lower.includes("claude") || lower.includes("anthropic")) {
-    return <span className="flex size-4 items-center justify-center text-[13px] font-bold leading-none">A</span>;
+function extractProvider(modelValue: string, providerLabel?: string): string {
+  if (modelValue.includes("/")) {
+    const prefix = modelValue.split("/")[0].toLowerCase();
+    if (prefix === "google-ai" || prefix === "gemini") return "google";
+    if (prefix === "github-copilot") return "githubcopilot";
+    return prefix;
   }
-  if (lower.includes("gpt") || lower.includes("openai")) {
-    return <span className="flex size-4 items-center justify-center text-[13px] font-semibold leading-none">O</span>;
-  }
-  return <Bot className="size-4 text-muted-foreground" />;
+  if (providerLabel) return providerLabel.toLowerCase().replace(/\s+/g, "");
+  const lower = modelValue.toLowerCase();
+  if (lower.includes("claude") || lower.includes("anthropic")) return "anthropic";
+  if (lower.includes("gpt") || lower.includes("openai")) return "openai";
+  if (lower.includes("gemini")) return "google";
+  if (lower.includes("mistral")) return "mistral";
+  if (lower.includes("llama") || lower.includes("groq")) return "groq";
+  if (lower.includes("deepseek")) return "deepseek";
+  return "";
+}
+
+function ModelProviderIcon({ modelValue, providerLabel, size = 16 }: { modelValue: string; providerLabel?: string; size?: number }) {
+  const provider = extractProvider(modelValue, providerLabel);
+  if (!provider) return <Bot className="size-4 text-muted-foreground" />;
+  return (
+    <span className="inline-flex shrink-0 items-center justify-center">
+      <LobeProviderIcon provider={provider} size={size} type="color" />
+    </span>
+  );
 }
 
 function compactModelLabel(model: string) {
   return model.includes("/") ? model.slice(model.indexOf("/") + 1) : model;
-}
-
-function ReasoningDropdown({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: ReasoningLevel;
-  disabled?: boolean;
-  onChange: (value: ReasoningLevel) => void;
-}) {
-  const selected = reasoningOptions.find((option) => option.value === value) ?? reasoningOptions[0];
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          className="gap-1.5 px-2"
-        >
-          <BrainCircuit className="size-3.5 text-muted-foreground" />
-          <span className="hidden sm:inline">{selected.label}</span>
-          <ChevronDown className="size-3 opacity-50" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="min-w-36 rounded-xl">
-        {reasoningOptions.map((option) => (
-          <DropdownMenuItem
-            key={option.value}
-            className="flex items-center justify-between gap-2"
-            onSelect={() => onChange(option.value)}
-          >
-            <span>{option.label}</span>
-            {value === option.value && <Check className="size-4 text-primary" />}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
 }
 
 export default function AI_Input_Search({
@@ -111,7 +85,7 @@ export default function AI_Input_Search({
   models,
   selectedModel,
   reasoningLevel,
-  placeholder = "What can I do for you?",
+  placeholder = "How can I help you today?",
   disabled,
   isLoading,
   className,
@@ -123,12 +97,12 @@ export default function AI_Input_Search({
   onReasoningLevelChange,
 }: AIInputSearchProps) {
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({
-    minHeight: 72,
-    maxHeight: 300,
+    minHeight: 88,
+    maxHeight: 320,
   });
 
   const selectedOption =
-    models.find((model) => model.value === selectedModel) ??
+    models.find((m) => m.value === selectedModel) ??
     ({ value: selectedModel, label: compactModelLabel(selectedModel) } satisfies PromptModelOption);
 
   useEffect(() => {
@@ -144,161 +118,165 @@ export default function AI_Input_Search({
   return (
     <form
       className={cn("w-full", className)}
-      onSubmit={(event) => {
-        event.preventDefault();
+      onSubmit={(e) => {
+        e.preventDefault();
         submit();
       }}
     >
-      <div className="rounded-md border border-border bg-card shadow-xs">
-        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
-          <div className="flex min-w-0 items-center gap-2">
-            <OperonMark className="size-4 rounded-sm" />
-            <span className="truncate font-medium text-foreground">Operon</span>
-            <span className="flex items-center gap-1 text-[10px]">
-              {isLoading ? (
-                <>
-                  <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-                  <span>Thinking…</span>
-                </>
-              ) : (
-                <>
-                  <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-                  <span>Ready</span>
-                </>
-              )}
-            </span>
-          </div>
-          <span className="hidden shrink-0 sm:inline">Enter to send · Shift+Enter newline</span>
-        </div>
+      {/* Textarea */}
+      <Textarea
+        ref={textareaRef}
+        id="operon-ai-prompt"
+        value={value}
+        disabled={disabled || isLoading}
+        placeholder={placeholder}
+        rows={1}
+        className="min-h-22 w-full resize-none rounded-none border-0 bg-transparent px-4 pt-4 pb-1 text-[15px] leading-relaxed text-foreground placeholder:text-muted-foreground/70 shadow-none focus-visible:ring-0 disabled:cursor-not-allowed"
+        onChange={(e) => {
+          onChange(e.target.value);
+          adjustHeight();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submit();
+          }
+        }}
+      />
 
-        <div className="relative flex flex-col">
-          <div className="max-h-100 overflow-y-auto">
-            <Textarea
-              ref={textareaRef}
-              id="operon-ai-prompt"
-              value={value}
-              disabled={disabled || isLoading}
-              placeholder={placeholder}
-              rows={1}
-              className="min-h-18 w-full resize-none rounded-none border-0 bg-transparent px-3 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed"
-              onChange={(event) => {
-                onChange(event.target.value);
-                adjustHeight();
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  submit();
-                }
-              }}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-2 border-t border-border px-2 py-2">
-              <div className="flex min-w-0 items-center gap-1">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={disabled || isLoading || models.length === 0}
-                      className="max-w-52 gap-1.5 px-2"
-                    >
-                      <AnimatePresence mode="wait">
-                        <motion.span
-                          key={selectedOption.value}
-                          className="flex min-w-0 items-center gap-1.5"
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 4 }}
-                          transition={{ duration: 0.15 }}
-                        >
-                          <span className="shrink-0">{providerGlyph(selectedOption.label)}</span>
-                          <span className="truncate">{selectedOption.label}</span>
-                          <ChevronDown className="size-3 shrink-0 opacity-50" />
-                        </motion.span>
-                      </AnimatePresence>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" side="top" className="max-h-80 min-w-64 overflow-y-auto rounded-xl">
-                    {models.map((model) => (
-                      <DropdownMenuItem
-                        key={model.value}
-                        className="flex items-center justify-between gap-3"
-                        onSelect={() => onModelChange(model.value)}
-                      >
-                        <div className="flex min-w-0 items-center gap-2">
-                          {providerGlyph(model.label)}
-                          <div className="min-w-0">
-                            <p className="truncate text-sm">{model.label}</p>
-                            {model.providerLabel && (
-                              <p className="truncate text-[11px] text-muted-foreground">{model.providerLabel}</p>
-                            )}
-                          </div>
-                        </div>
-                        {selectedModel === model.value && <Check className="size-4 shrink-0 text-primary" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                <div className="h-4 w-px bg-border" />
-
-                <ReasoningDropdown
-                  value={reasoningLevel}
-                  disabled={disabled || isLoading}
-                  onChange={onReasoningLevelChange}
-                />
-
-                {onAttach && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Attach file"
-                        onClick={onAttach}
-                        disabled={disabled || isLoading}
-                      >
-                        <Paperclip className="size-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">Attach file</TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
-
-              {isLoading ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      aria-label="Stop generating"
-                      onClick={onStop}
-                    >
-                      <StopCircle className="size-3.5" />
-                      Stop
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">Stop generating</TooltipContent>
-                </Tooltip>
-              ) : (
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+        {/* Left controls */}
+        <div className="flex items-center gap-0.5">
+          {onAttach && (
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button
-                  type="submit"
-                  size="sm"
-                  aria-label="Send message"
-                  disabled={disabled || !value.trim()}
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Attach file"
+                  onClick={onAttach}
+                  disabled={disabled || isLoading}
+                  className="rounded-full text-muted-foreground hover:text-foreground"
                 >
-                  Send
-                  <ArrowRight className="size-3.5" />
+                  <Paperclip className="size-4" />
                 </Button>
-              )}
-            </div>
+              </TooltipTrigger>
+              <TooltipContent side="top">Attach file</TooltipContent>
+            </Tooltip>
+          )}
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled || isLoading || models.length === 0}
+                className="h-8 gap-1.5 rounded-full px-2.5 text-[13px] font-medium text-foreground/80 hover:text-foreground"
+              >
+                <AnimatePresence mode="wait">
+                  <motion.span
+                    key={selectedOption.value}
+                    className="flex min-w-0 items-center gap-1.5"
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 4 }}
+                    transition={{ duration: 0.12 }}
+                  >
+                    <ModelProviderIcon modelValue={selectedOption.value} providerLabel={selectedOption.providerLabel} size={14} />
+                    <span className="max-w-36 truncate">{selectedOption.label}</span>
+                    <ChevronDown className="size-3 shrink-0 opacity-50" />
+                  </motion.span>
+                </AnimatePresence>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top" className="max-h-80 min-w-72 overflow-y-auto rounded-xl p-1.5">
+              {models.map((model) => (
+                <DropdownMenuItem
+                  key={model.value}
+                  className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-2"
+                  onSelect={() => onModelChange(model.value)}
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background shadow-xs">
+                      <ModelProviderIcon modelValue={model.value} providerLabel={model.providerLabel} size={16} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{model.label}</p>
+                      {model.providerLabel && (
+                        <p className="truncate text-[11px] text-muted-foreground">{model.providerLabel}</p>
+                      )}
+                    </div>
+                  </div>
+                  {selectedModel === model.value && <Check className="size-3.5 shrink-0 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled || isLoading}
+                className="h-8 gap-1.5 rounded-full px-2.5 text-[13px] font-medium text-foreground/80 hover:text-foreground"
+              >
+                <BrainCircuit className="size-3.5 text-muted-foreground" />
+                <span className="hidden sm:inline">{reasoningLabels[reasoningLevel]}</span>
+                <ChevronDown className="size-3 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top" className="min-w-40 rounded-xl p-1.5">
+              {(["auto", "low", "medium", "high"] as ReasoningLevel[]).map((lvl) => (
+                <DropdownMenuItem
+                  key={lvl}
+                  className="flex items-center justify-between gap-2 rounded-lg"
+                  onSelect={() => onReasoningLevelChange(lvl)}
+                >
+                  <span>{reasoningLabels[lvl]}</span>
+                  {reasoningLevel === lvl && <Check className="size-3.5 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+
+        {isLoading ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                aria-label="Stop generating"
+                onClick={onStop}
+                className="size-8 shrink-0 rounded-full border-border/60"
+              >
+                <Square className="size-3.5 fill-current" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Stop</TooltipContent>
+          </Tooltip>
+        ) : (
+          <Button
+            type="submit"
+            size="icon"
+            aria-label="Send message"
+            disabled={disabled || !value.trim()}
+            className={cn(
+              "size-8 shrink-0 rounded-full transition-all",
+              value.trim() && !disabled
+                ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+                : "cursor-not-allowed bg-muted text-muted-foreground/40",
+            )}
+          >
+            <ArrowUp className="size-4" />
+          </Button>
+        )}
       </div>
     </form>
   );
