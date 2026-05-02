@@ -8,6 +8,7 @@ import { motion } from "framer-motion"
 import { signIn } from "next-auth/react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { OperonWordmark } from "@/components/brand"
 
 export function SignUpForm() {
   const router = useRouter()
@@ -77,6 +78,9 @@ export function SignUpForm() {
       {/* Glass card */}
       <div className="rounded-2xl border border-white/60 bg-white/70 backdrop-blur-xl shadow-[0_8px_60px_rgba(0,0,0,0.04)] p-8 sm:p-10">
         {/* Header */}
+        <div className="flex justify-center mb-6">
+          <OperonWordmark height={28} />
+        </div>
         <div className="text-center mb-8">
           <motion.h1
             initial={{ opacity: 0, y: 10 }}

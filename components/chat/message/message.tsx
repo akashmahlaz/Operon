@@ -55,18 +55,14 @@ function AssistantAvatar() {
   );
 }
 
-function PendingAssistantMessage() {
+function PendingAssistantMessage({ thinking, isStreaming }: { thinking?: string; isStreaming: boolean }) {
+  // Show live reasoning inline — no separate "Thinking..." bubble
   return (
     <BlurFade delay={0.05} direction="up">
       <div className="flex max-w-3xl items-start gap-3 py-3">
         <AssistantAvatar />
-        <div className="flex items-center gap-2 pt-1">
-          <div className="flex gap-1">
-            <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:0ms]" />
-            <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:150ms]" />
-            <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:300ms]" />
-          </div>
-          <AnimatedShinyText className="text-xs">Thinking…</AnimatedShinyText>
+        <div className="min-w-0 flex-1">
+          <ReasoningPart text={thinking || ""} streaming={isStreaming} />
         </div>
       </div>
     </BlurFade>
@@ -144,6 +140,8 @@ function ChatMessageRow({ message, isLast, isLoading }: { message: ChatDisplayMe
 }
 
 export function ChatMessageList({ messages, isLoading }: { messages: ChatDisplayMessage[]; isLoading: boolean }) {
+  const lastMsg = messages[messages.length - 1];
+  const isStreaming = isLoading && lastMsg?.role === "user";
   return (
     <div className="flex flex-col gap-2 pb-4">
       {messages.map((message, index) => (
@@ -155,7 +153,7 @@ export function ChatMessageList({ messages, isLoading }: { messages: ChatDisplay
         />
       ))}
 
-      {isLoading && messages[messages.length - 1]?.role === "user" && <PendingAssistantMessage />}
+      {isStreaming && <PendingAssistantMessage thinking={lastMsg?.thinking} isStreaming />}
     </div>
   );
 }
