@@ -3,7 +3,8 @@
 import * as React from "react";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
-import { Sun, Moon, Sparkles } from "lucide-react";
+import { OperonMark } from "@/components/brand";
+import { Sun, Moon } from "lucide-react";
 
 interface DashboardTopbarProps {
   title?: string;
@@ -33,8 +34,8 @@ export function DashboardTopbar({ title, subtitle, actions }: DashboardTopbarPro
         >
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="What's new">
-          <Sparkles className="h-4 w-4" />
+        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Operon">
+          <OperonMark className="size-5 rounded-md bg-transparent text-foreground" />
         </Button>
       </div>
     </header>

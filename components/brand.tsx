@@ -31,20 +31,17 @@ export function OperonWordmark({
 }
 
 export function OperonMark({ className }: { className?: string }) {
-  // Compact diamond/O mark used in tight spaces (sidebar collapsed, favicon-ish)
   return (
-    <span
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/logo.png"
+      alt="Operon"
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-lg bg-foreground text-background",
+        "h-7 w-7 shrink-0 object-contain",
+        "mix-blend-multiply dark:mix-blend-normal dark:brightness-0 dark:invert",
         className,
       )}
-    >
-      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 7 L15 12 L12 17 L9 12 Z" />
-        <circle cx="12" cy="12" r="3" />
-      </svg>
-    </span>
+    />
   );
 }
 

@@ -1,15 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Sparkles } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AnimatedShinyText } from "@/components/ui/animated-shiny-text";
-import { BlurFade } from "@/components/ui/blur-fade";
+import { OperonMark } from "@/components/brand";
 import type { ChatDisplayMessage, ParsedAttachment } from "@/components/chat/message/types";
 import { FilePartList } from "@/components/chat/message/parts/file-part";
 import { ReasoningPart } from "@/components/chat/message/parts/reasoning-part";
 import { TextPart } from "@/components/chat/message/parts/text-part";
 import { getToolLabel, ToolPartList } from "@/components/chat/message/parts/tool-part";
+import { cn } from "@/lib/utils";
 
 const ATTACHMENT_RE = /\[(Image|File):\s*([^\]]+)\]\(([^)]+)\)/g;
 
@@ -47,25 +47,46 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function AssistantAvatar() {
+function AssistantAvatar({ active }: { active?: boolean }) {
   return (
-    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary">
-      <Sparkles className="size-3.5 text-primary-foreground" />
+    <div
+      className={cn(
+        "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-transparent ring-1 ring-border/70 transition-transform duration-300 group-hover:scale-105",
+        active && "animate-pulse ring-primary/30",
+      )}
+    >
+      <OperonMark className="size-5 rounded-md bg-transparent text-foreground" />
     </div>
   );
 }
 
-function PendingAssistantMessage({ thinking, isStreaming }: { thinking?: string; isStreaming: boolean }) {
-  // Show live reasoning inline — no separate "Thinking..." bubble
+function StreamingDots() {
   return (
-    <BlurFade delay={0.05} direction="up">
-      <div className="flex max-w-3xl items-start gap-3 py-3">
-        <AssistantAvatar />
-        <div className="min-w-0 flex-1">
-          <ReasoningPart text={thinking || ""} streaming={isStreaming} />
-        </div>
+    <span className="inline-flex items-center gap-1" aria-label="Generating">
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.3s]" />
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.15s]" />
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70" />
+    </span>
+  );
+}
+
+function PendingAssistantMessage({ thinking, isStreaming }: { thinking?: string; isStreaming: boolean }) {
+  // Render the assistant placeholder immediately so the UI is streaming-shaped
+  // (per AI SDK Streaming UI guidance) even before the first chunk arrives.
+  return (
+    <div className="flex max-w-3xl items-start gap-3 py-3">
+      <AssistantAvatar active={isStreaming} />
+      <div className="min-w-0 flex-1">
+        {thinking ? (
+          <ReasoningPart text={thinking} streaming={isStreaming} />
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <StreamingDots />
+            <span className="italic">Thinking…</span>
+          </div>
+        )}
       </div>
-    </BlurFade>
+    </div>
   );
 }
 
@@ -100,30 +121,30 @@ function AssistantMessage({ message, isLast, isLoading }: { message: ChatDisplay
           .join(" | ")
       : undefined;
   const reasoningText = message.thinking || (derivedThinking ? `Working on: ${derivedThinking}` : "");
-  const isStreamingReasoning = isLoading && isLast && !message.content;
+  const isStreamingThis = isLoading && isLast;
+  const showWaitingForText = isStreamingThis && !message.content;
 
   return (
     <div className="group flex max-w-3xl items-start gap-3 py-3">
-      <AssistantAvatar />
+      <AssistantAvatar active={isStreamingThis} />
       <div className="min-w-0 flex-1">
         <div className="space-y-2">
-          <ReasoningPart text={reasoningText} streaming={isStreamingReasoning && Boolean(reasoningText)} />
+          {reasoningText && (
+            <ReasoningPart text={reasoningText} streaming={isStreamingThis} />
+          )}
           <ToolPartList tools={message.toolCalls} />
           {message.content ? (
             <TextPart text={message.content} />
-          ) : isLoading && isLast ? (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <div className="flex gap-1">
-                <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:0ms]" />
-                <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:150ms]" />
-                <span className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:300ms]" />
-              </div>
-              <span className="text-xs">{hasToolCalls ? "Working…" : "Thinking…"}</span>
-            </div>
           ) : null}
+          {showWaitingForText && !reasoningText && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <StreamingDots />
+              <span className="italic">Generating…</span>
+            </div>
+          )}
         </div>
 
-        {message.content && (
+        {message.content && !isStreamingThis && (
           <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
             <CopyButton text={message.content} />
           </div>

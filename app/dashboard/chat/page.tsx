@@ -6,11 +6,8 @@ import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Sparkles,
   Check,
   ChevronDown,
-  StopCircle,
-  ArrowUp,
   MessageSquare,
   Globe,
   Search,
@@ -19,7 +16,6 @@ import {
   MessageCircle,
   Send,
   Wifi,
-  Paperclip,
   Settings2,
   QrCode,
   Power,
@@ -34,7 +30,6 @@ import {
   PanelLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { MagicCard } from "@/components/ui/magic-card";
@@ -42,9 +37,14 @@ import { BorderBeam } from "@/components/ui/border-beam";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { Ripple } from "@/components/ui/ripple";
 import { ShineBorder } from "@/components/ui/shine-border";
-import { AnimatedShinyText } from "@/components/ui/animated-shiny-text";
+import { OperonMark } from "@/components/brand";
+import AI_Input_Search, {
+  type PromptModelOption,
+  type ReasoningLevel,
+} from "@/components/kokonutui/ai-input-search";
 import { ChatMessageList } from "@/components/chat/message/message";
 import type { ChatDisplayMessage } from "@/components/chat/message/types";
+import { isModelProvider, type ProviderMeta } from "@/components/dashboard/settings/provider-catalog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -177,7 +177,7 @@ function ChatPage() {
   const [activeChannel, setActiveChannel] = useState<string>("web");
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [channelStatus, setChannelStatus] = useState<Record<string, boolean>>({
@@ -200,15 +200,40 @@ function ChatPage() {
   } | null>(null);
   const [waConnecting, setWaConnecting] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("minimax/MiniMax-M2.7");
+  const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("auto");
+  const [providers, setProviders] = useState<ProviderMeta[]>([]);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     convIdRef.current = conversationId;
   }, [conversationId]);
+
+  useEffect(() => {
+    fetch("/api/providers", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        setProviders(data.providers || []);
+        if (typeof data.defaultModel === "string" && data.defaultModel) {
+          setSelectedModel(data.defaultModel);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const connectedProviders = providers.filter((p) => p.configured && isModelProvider(p));
+  const modelOptions: PromptModelOption[] = connectedProviders.flatMap((provider) =>
+    (provider.models?.length ? provider.models : provider.recommendedModel ? [provider.recommendedModel] : [])
+      .slice(0, 12)
+      .map((model) => ({
+        value: `${provider.id}/${model}`,
+        label: model,
+        providerLabel: provider.name,
+      })),
+  );
 
   const primaryChannel = channelStatus.whatsapp
     ? "whatsapp"
@@ -265,10 +290,6 @@ function ChatPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlConvId]);
-
-  useEffect(() => {
-    if (!isLoading && activeChannel === "web") textareaRef.current?.focus();
-  }, [conversationId, isLoading, activeChannel]);
 
   async function loadConversations() {
     try {
@@ -408,14 +429,9 @@ function ChatPage() {
     setChatMessages([]);
     setActiveChannel("web");
     setInput("");
-    requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
-  function handleAbort() {
-    stopChat();
-  }
-
-  function handleFileClick() {
+    function handleFileClick() {
     fileInputRef.current?.click();
   }
 
@@ -453,7 +469,6 @@ function ChatPage() {
         });
     }
     e.target.value = "";
-    textareaRef.current?.focus();
   }
 
   function removeAttachedFile(file: File) {
@@ -497,9 +512,9 @@ function ChatPage() {
     }
   }
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(async (overrideContent?: string) => {
     if (isLoading) return;
-    let content = input.trim();
+    let content = (overrideContent ?? input).trim();
     if (!content && attachedFiles.length === 0) return;
 
     const uploadedFiles = attachedFiles.filter((f) => f.url);
@@ -519,25 +534,25 @@ function ChatPage() {
       let activeConvId = conversationId;
       if (!activeConvId) activeConvId = await createConversation();
       convIdRef.current = activeConvId;
-      await sendMessage({ text: content });
+      await sendMessage(
+        { text: content },
+        {
+          body: {
+            conversationId: activeConvId,
+            modelSpec: selectedModel,
+            reasoningLevel,
+          },
+        },
+      );
       loadConversations();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to connect";
       toast.error(message);
-    } finally {
-      requestAnimationFrame(() => textareaRef.current?.focus());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, isLoading, conversationId, attachedFiles, sendMessage]);
+  }, [input, isLoading, conversationId, attachedFiles, sendMessage, selectedModel, reasoningLevel]);
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  }
-
-  const isChannelConversation = activeChannel !== "web";
+    const isChannelConversation = activeChannel !== "web";
 
   const filteredConversations = searchQuery
     ? conversations.filter(
@@ -701,7 +716,7 @@ function ChatPage() {
             )}
           </div>
 
-          <div className="pointer-events-auto">
+          <div className="hidden">
             <Popover
               open={channelPanelOpen}
               onOpenChange={(open) => {
@@ -1180,30 +1195,15 @@ function ChatPage() {
           <div className="mx-auto max-w-3xl px-4 py-6">
             {messages.length === 0 && !conversationId && (
               <div className="flex min-h-[60vh] flex-col items-center justify-center">
-                <BlurFade delay={0.1} direction="up">
-                  <div className="relative mb-6 flex size-16 items-center justify-center overflow-hidden rounded-2xl border border-primary/20 bg-primary/10 shadow-sm">
-                    <Sparkles className="size-7 text-primary" />
-                    <BorderBeam
-                      size={50}
-                      duration={3}
-                      colorFrom="hsl(var(--primary))"
-                      colorTo="hsl(var(--primary) / 0.3)"
-                      borderWidth={1.5}
-                    />
-                  </div>
-                </BlurFade>
-                <BlurFade delay={0.2} direction="up">
-                  <h1 className="font-heading text-[28px] font-extrabold leading-[1.1] tracking-[-0.035em] text-foreground sm:text-[36px]">
-                    <AnimatedShinyText className="text-[28px] font-extrabold tracking-[-0.035em] sm:text-[36px]">
-                      Build, automate, and ship.
-                    </AnimatedShinyText>
-                  </h1>
-                </BlurFade>
-                <BlurFade delay={0.3} direction="up">
-                  <p className="mt-2.5 max-w-sm text-center text-[15px] leading-relaxed text-muted-foreground">
-                    Ask for image, video, audio, docs, integrations, or multi-step automation.
-                  </p>
-                </BlurFade>
+                <div className="mb-6 flex size-16 items-center justify-center rounded-2xl border border-border bg-card shadow-sm">
+                  <OperonMark className="size-10 rounded-xl bg-transparent text-foreground" />
+                </div>
+                <h1 className="font-heading text-[28px] font-extrabold leading-[1.1] text-foreground sm:text-[36px]">
+                  Build, automate, and ship.
+                </h1>
+                <p className="mt-2.5 max-w-sm text-center text-[15px] leading-relaxed text-muted-foreground">
+                  Ask for image, video, audio, docs, integrations, or multi-step automation.
+                </p>
               </div>
             )}
 
@@ -1292,7 +1292,7 @@ function ChatPage() {
                 </div>
               )}
 
-              <div className="relative flex items-end">
+              <div className="relative flex items-end gap-2">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1301,60 +1301,26 @@ function ChatPage() {
                   onChange={handleFileChange}
                   accept="image/*,.pdf,.txt,.csv,.md,.json,.doc,.docx,.xls,.xlsx"
                 />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={handleFileClick}
-                      disabled={isChannelConversation}
-                      className="absolute bottom-3 left-3 rounded-xl p-1.5 text-muted-foreground transition-all hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
-                    >
-                      <Paperclip className="size-4" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Attach file</TooltipContent>
-                </Tooltip>
-
-                <Textarea
-                  ref={textareaRef}
+                <AI_Input_Search
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
+                  models={modelOptions}
+                  selectedModel={selectedModel}
+                  disabled={isChannelConversation}
+                  isLoading={isLoading}
+                  reasoningLevel={reasoningLevel}
+                  onModelChange={setSelectedModel}
+                  onReasoningLevelChange={setReasoningLevel}
+                  onAttach={handleFileClick}
+                  onChange={(value) => setInput(value)}
+                  onSubmit={(value) => handleSend(value)}
+                  onStop={stopChat}
                   placeholder={
                     isChannelConversation
                       ? `Viewing ${CHANNEL_META[activeChannel]?.label} conversation`
-                      : "Message Operon…"
+                      : "Message Operon..."
                   }
-                  rows={1}
-                  className="min-h-14 max-h-40 resize-none border-0 bg-transparent py-4 pl-12 pr-14 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
-                  disabled={isLoading || isChannelConversation}
+                  className="flex-1"
                 />
-
-                <div className="absolute bottom-3 right-3">
-                  {isLoading ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={handleAbort}
-                          className="flex size-8 items-center justify-center rounded-xl bg-muted text-muted-foreground transition-colors hover:bg-muted/80"
-                        >
-                          <StopCircle className="size-4" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>Stop generating</TooltipContent>
-                    </Tooltip>
-                  ) : (
-                    <button
-                      onClick={handleSend}
-                      disabled={
-                        (!input.trim() && !attachedFiles.some((f) => f.url)) ||
-                        isChannelConversation
-                      }
-                      className="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-all hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
-                    >
-                      <ArrowUp className="size-4" />
-                    </button>
-                  )}
-                </div>
               </div>
             </div>
             <p className="mt-2 text-center text-[11px] text-muted-foreground">

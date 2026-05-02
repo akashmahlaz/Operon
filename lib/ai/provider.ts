@@ -23,7 +23,10 @@ const OPENAI_COMPATIBLE_BASE_URLS: Record<string, string> = {
 export async function getChatModel(userId?: string, modelSpec?: string) {
   const settings = userId ? await getUserSettings(userId) : null;
   const spec = modelSpec || settings?.defaultModel || `minimax/${DEFAULT_CHAT_MODEL}`;
-  const [providerId, rawModelId] = spec.includes("/") ? spec.split("/", 2) : ["minimax", spec];
+  const slashIndex = spec.indexOf("/");
+  const [providerId, rawModelId] = slashIndex >= 0
+    ? [spec.slice(0, slashIndex), spec.slice(slashIndex + 1)]
+    : ["minimax", spec];
   const modelId = rawModelId || defaultModelFor(providerId);
 
   if (providerId === "minimax") return minimax(modelId || DEFAULT_CHAT_MODEL);

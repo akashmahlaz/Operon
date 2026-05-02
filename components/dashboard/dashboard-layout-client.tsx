@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LogOut, PanelLeft, PanelLeftClose, Sparkles } from "lucide-react";
+import { LogOut, PanelLeft, PanelLeftClose } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -24,6 +24,7 @@ import {
   primaryDashboardSections,
   settingsDashboardSection,
 } from "@/components/dashboard/dashboard-sections";
+import { OperonMark, OperonWordmark } from "@/components/brand";
 import { cn } from "@/lib/utils";
 
 interface DashboardLayoutClientProps {
@@ -34,7 +35,7 @@ interface DashboardLayoutClientProps {
 export function DashboardLayoutClient({ user, children }: DashboardLayoutClientProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const SettingsIcon = settingsDashboardSection.icon;
 
   const isSettings = pathname.startsWith("/dashboard/settings");
@@ -95,17 +96,13 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
           <Link
             href="/dashboard/chat"
             className={cn(
-              "flex items-center gap-2.5",
+              "flex items-center gap-2",
               expanded ? "px-1.5" : ""
             )}
           >
-            <div className="flex size-9 items-center justify-center rounded-xl bg-foreground shadow-[inset_0_0_12px_rgba(255,255,255,0.15)]">
-              <Sparkles className="size-4 text-background" />
-            </div>
+            <OperonMark className="size-9 rounded-xl" />
             {expanded && (
-              <span className="font-heading text-[15px] font-bold text-foreground tracking-tight">
-                Operon
-              </span>
+              <OperonWordmark height={17} />
             )}
           </Link>
           {expanded && (

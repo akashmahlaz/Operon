@@ -3,7 +3,6 @@
 import { useChat } from "@ai-sdk/react";
 import { useEffect, useRef } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import TextPart from "./parts/textPart";
 import ReasoningPart from "./parts/ai-reasoning";
@@ -33,7 +32,8 @@ function MessageAvatar({ role }: { role: string }) {
           isUser ? "bg-muted text-foreground/80" : "bg-foreground text-background",
         )}
       >
-        {isUser ? "U" : <Sparkles className="h-3.5 w-3.5" />}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {isUser ? "U" : <img src="/logo.png" alt="Operon" className="h-3.5 w-3.5 object-contain mix-blend-multiply dark:mix-blend-normal dark:brightness-0 dark:invert" />}
       </AvatarFallback>
     </Avatar>
   );
@@ -88,8 +88,9 @@ function EmptyState() {
     <div className="flex flex-1 flex-col items-center justify-center gap-8 px-4 py-16 text-center">
       <div className="relative">
         <div className="absolute inset-0 animate-ping rounded-full bg-primary/20 opacity-75" />
-        <div className="relative inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-foreground text-background">
-          <Sparkles className="h-6 w-6" />
+        <div className="relative inline-flex h-14 w-14 items-center justify-center rounded-2xl">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Operon" className="h-14 w-14 object-contain mix-blend-multiply dark:mix-blend-normal dark:brightness-0 dark:invert" />
         </div>
       </div>
       <div className="space-y-2">
