@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { LogOut, Settings } from "lucide-react";
+import { LogOut, Settings, ChevronRight } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -35,6 +35,7 @@ interface DashboardLayoutClientProps {
 export function DashboardLayoutClient({ user, children }: DashboardLayoutClientProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const [expanded, setExpanded] = useState(false);
   const SettingsIcon = settingsDashboardSection.icon;
 
   const isSettings = pathname.startsWith("/dashboard/settings");
@@ -47,15 +48,35 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
   return (
     <TooltipProvider>
       <div className="flex h-dvh bg-background">
-        {/* ── Icon rail ── */}
-        <nav className="flex w-15 shrink-0 flex-col items-center border-r border-border/60 bg-sidebar py-3">
-          {/* Logo */}
-          <Link href="/dashboard/chat" className="mb-5 flex size-9 items-center justify-center">
-            <OperonMark className="size-7" />
-          </Link>
+        {/* ── Sidebar ── */}
+        <nav
+          className={cn(
+            "flex shrink-0 flex-col border-r border-border/60 bg-sidebar transition-all duration-300 ease-out",
+            expanded ? "w-52" : "w-15",
+          )}
+        >
+          {/* Logo + expand toggle */}
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className={cn(
+              "group flex items-center gap-2.5 py-4 transition-colors hover:opacity-80",
+              expanded ? "px-4" : "justify-center",
+            )}
+            aria-label={expanded ? "Collapse sidebar" : "Expand sidebar"}
+          >
+            <OperonMark className="size-7 shrink-0" />
+            {expanded && (
+              <>
+                <span className="flex-1 text-left text-[15px] font-semibold tracking-tight text-foreground">
+                  Operon
+                </span>
+                <ChevronRight className="size-3.5 rotate-180 text-muted-foreground transition-transform duration-200" />
+              </>
+            )}
+          </button>
 
           {/* Primary nav */}
-          <div className="flex flex-1 flex-col items-center gap-1">
+          <div className={cn("flex flex-1 flex-col gap-0.5 px-2 pb-2")}>
             {primaryDashboardSections.map((section) => {
               const isActive = activeSection === section.id;
               const Icon = section.icon;
@@ -65,57 +86,84 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
                     <Link
                       href={section.href}
                       className={cn(
-                        "group relative flex size-10 items-center justify-center rounded-xl transition-all duration-150",
+                        "group relative flex items-center gap-2.5 rounded-xl transition-all duration-150",
+                        expanded ? "px-3 py-2.5" : "size-10 justify-center mx-auto",
                         isActive
                           ? `${section.bg} ${section.text} shadow-xs`
-                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
                       )}
                     >
                       <Icon className="size-4.5 shrink-0" />
-                      {isActive && (
+                      {expanded && (
+                        <span className={cn("text-[13px]", isActive ? "font-semibold" : "font-medium")}>
+                          {section.label}
+                        </span>
+                      )}
+                      {isActive && !expanded && (
                         <span className="absolute -left-3.25 top-1/2 h-5 w-0.75 -translate-y-1/2 rounded-r-full bg-current opacity-70" />
                       )}
                     </Link>
                   </TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={10} className="font-medium">
-                    {section.label}
-                  </TooltipContent>
+                  {!expanded && (
+                    <TooltipContent side="right" sideOffset={10} className="font-medium">
+                      {section.label}
+                    </TooltipContent>
+                  )}
                 </Tooltip>
               );
             })}
           </div>
 
           {/* Bottom: Settings + Avatar */}
-          <div className="flex flex-col items-center gap-2">
-            <div className="mb-1 h-px w-7 bg-border/60" />
+          <div className={cn("flex flex-col gap-1 px-2 pb-3")}>
+            <div className="mb-1 h-px bg-border/60" />
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
                 <Link
                   href="/dashboard/settings"
                   className={cn(
-                    "flex size-10 items-center justify-center rounded-xl transition-all duration-150",
+                    "flex items-center gap-2.5 rounded-xl transition-all duration-150",
+                    expanded ? "px-3 py-2.5" : "size-10 justify-center mx-auto",
                     isSettings
                       ? "bg-primary/10 text-primary shadow-xs"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}
                 >
                   <SettingsIcon className="size-4.5" />
+                  {expanded && (
+                    <span className={cn("text-[13px]", isSettings ? "font-semibold" : "font-medium")}>
+                      Settings
+                    </span>
+                  )}
                 </Link>
               </TooltipTrigger>
-              <TooltipContent side="right" sideOffset={10} className="font-medium">
-                Settings
-              </TooltipContent>
+              {!expanded && (
+                <TooltipContent side="right" sideOffset={10} className="font-medium">
+                  Settings
+                </TooltipContent>
+              )}
             </Tooltip>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex size-10 items-center justify-center rounded-xl transition-colors hover:bg-accent focus:outline-none">
-                  <Avatar className="size-7 ring-2 ring-border">
+                <button
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-xl p-1.5 transition-colors hover:bg-accent focus:outline-none",
+                    expanded ? "w-full" : "mx-auto",
+                  )}
+                >
+                  <Avatar className="size-7 shrink-0 ring-2 ring-border">
                     {user?.image ? <AvatarImage src={user.image} alt={user.name || ""} /> : null}
                     <AvatarFallback className="bg-foreground text-background text-[11px] font-semibold">
                       {userInitial}
                     </AvatarFallback>
                   </Avatar>
+                  {expanded && (
+                    <div className="min-w-0 flex-1 text-left">
+                      <p className="truncate text-[12px] font-medium text-foreground">{user?.name || "User"}</p>
+                      <p className="truncate text-[10px] text-muted-foreground">{user?.email}</p>
+                    </div>
+                  )}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="end" sideOffset={10} className="w-52 rounded-xl">

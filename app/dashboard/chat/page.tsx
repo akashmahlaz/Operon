@@ -26,8 +26,8 @@ import {
   Phone,
   Users,
   ChevronRight,
+  ChevronLeft,
   Shield,
-  PanelLeftClose,
   PanelLeft,
   Code2,
   PenLine,
@@ -608,7 +608,7 @@ function ChatPage() {
       <div
         className={cn(
           "hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-out md:flex",
-          panelOpen ? "w-[260px]" : "w-0 overflow-hidden border-r-0",
+          panelOpen ? "w-65" : "w-0 overflow-hidden border-r-0",
         )}
       >
         {/* Header */}
@@ -627,10 +627,10 @@ function ChatPage() {
                   onClick={() => setPanelOpen(false)}
                   className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
-                  <PanelLeftClose className="size-4" />
+                  <ChevronLeft className="size-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">Hide panel</TooltipContent>
+              <TooltipContent side="bottom">Close</TooltipContent>
             </Tooltip>
           </div>
           <div className="relative">
