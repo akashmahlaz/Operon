@@ -190,6 +190,8 @@ export async function POST(req: Request) {
     temperature: persona.temperature,
     topP: persona.topP,
     maxOutputTokens: persona.maxTokens && persona.maxTokens > 0 ? persona.maxTokens : undefined,
+    frequencyPenalty: persona.frequencyPenalty,
+    presencePenalty: persona.presencePenalty,
     stopWhen: stepCountIs(8),
     experimental_transform: smoothStream({ delayInMs: 18, chunking: "word" }),
     experimental_onToolCallFinish: async (event) => {

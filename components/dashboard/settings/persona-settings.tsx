@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { BookOpen, Brain, FileText, MessageCircle, Palette, Save, Sparkles, Trash2, User, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BookOpen, Brain, FileText, MessageCircle, Palette, Save, Sparkles, Trash2, User, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -102,32 +102,25 @@ export function PersonaSettings() {
     return () => { cancelled = true; };
   }, []);
 
-  const loadMemories = useCallback(() => {
-    setMemoriesLoading(true);
+  useEffect(() => {
+    let cancelled = false;
     fetch("/api/memory")
       .then((r) => (r.ok ? r.json() : { results: [] }))
-      .then((data) => setMemories((data.results ?? []) as MemoryFact[]))
+      .then((data) => { if (!cancelled) setMemories((data.results ?? []) as MemoryFact[]); })
       .catch(() => {})
-      .finally(() => setMemoriesLoading(false));
+      .finally(() => { if (!cancelled) setMemoriesLoading(false); });
+    return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => { loadMemories(); }, [loadMemories]);
 
   // Load workspace files
   useEffect(() => {
-    setWsFilesLoading(true);
+    let cancelled = false;
     fetch("/api/workspace-files")
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!data?.files) return;
-        setWsFiles({
-          bootstrap: data.files.bootstrap ?? "",
-          soul: data.files.soul ?? "",
-          user: data.files.user ?? "",
-        });
-      })
+      .then((data) => { if (!cancelled && data?.files) setWsFiles({ bootstrap: data.files.bootstrap ?? "", soul: data.files.soul ?? "", user: data.files.user ?? "" }); })
       .catch(() => {})
-      .finally(() => setWsFilesLoading(false));
+      .finally(() => { if (!cancelled) setWsFilesLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   async function save() {
@@ -476,7 +469,12 @@ export function PersonaSettings() {
           ) : (
             <>
               <div className="space-y-2">
-                <Label className="text-sm font-medium">BOOTSTRAP.md — Operational Rules</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">BOOTSTRAP.md — Operational Rules</Label>
+                  <Button variant="ghost" size="icon" className="size-6 text-muted-foreground hover:text-destructive" onClick={() => setWsFiles((f) => ({ ...f, bootstrap: "" }))} title="Clear">
+                    <X className="size-3" />
+                  </Button>
+                </div>
                 <p className="text-[11px] text-muted-foreground">Loaded first. Use for: preferred tools, workflow rules, hard constraints. Apply always.</p>
                 <textarea
                   className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -486,7 +484,12 @@ export function PersonaSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-sm font-medium">SOUL.md — Personality &amp; Voice</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">SOUL.md — Personality &amp; Voice</Label>
+                  <Button variant="ghost" size="icon" className="size-6 text-muted-foreground hover:text-destructive" onClick={() => setWsFiles((f) => ({ ...f, soul: "" }))} title="Clear">
+                    <X className="size-3" />
+                  </Button>
+                </div>
                 <p className="text-[11px] text-muted-foreground">Loaded second. Use for: communication style, tone, phrases to use or avoid.</p>
                 <textarea
                   className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -496,7 +499,12 @@ export function PersonaSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-sm font-medium">USER.md — Learned Facts</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">USER.md — Learned Facts</Label>
+                  <Button variant="ghost" size="icon" className="size-6 text-muted-foreground hover:text-destructive" onClick={() => setWsFiles((f) => ({ ...f, user: "" }))} title="Clear">
+                    <X className="size-3" />
+                  </Button>
+                </div>
                 <p className="text-[11px] text-muted-foreground">Operon writes facts here when you tell it about yourself. Edit to add or correct.</p>
                 <textarea
                   className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
