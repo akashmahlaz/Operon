@@ -3,7 +3,11 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { textFromParts, toModelMessages } from "@/lib/ai/convert";
 import { getChatModel } from "@/lib/ai/provider";
-import { OPERON_SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
+import { OPERON_SYSTEM_PROMPT, buildCapabilitySnapshot } from "@/lib/ai/system-prompt";
+import { buildAvailableTools } from "@/lib/ai/tools/registry";
+import { autoExtractMemory } from "@/lib/ai/memory-extractor";
+import { memory } from "@/lib/memory";
+import { buildPersonaSystemPrompt, getPersonaForChannel } from "@/lib/services/user-settings";
 import { appendMessage, createConversation, deleteConversation, getConversation, listConversations } from "@/lib/services/chat-store";
 import { appendLog } from "@/lib/services/logs";
 import type { Channel } from "@/lib/types";
@@ -129,10 +133,23 @@ export async function POST(req: Request) {
   }
 
   const modelMessages = await toModelMessages(messages);
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+  const lastUserText = lastUserMessage ? textFromParts(lastUserMessage.parts) : "";
+  const persona = await getPersonaForChannel(userId, body.channel ?? "web");
+  const [memoryContext, capabilitySnapshot] = await Promise.all([
+    persona.memoryEnabled
+      ? memory.context(userId, lastUserText, 8, { depth: persona.memoryDepth })
+      : Promise.resolve(""),
+    buildCapabilitySnapshot(userId),
+  ]);
+  const personaPrompt = buildPersonaSystemPrompt(persona);
+  const systemPrompt = [OPERON_SYSTEM_PROMPT, capabilitySnapshot, personaPrompt, memoryContext].filter(Boolean).join("\n\n");
+  const tools = await buildAvailableTools(userId);
 
   const result = streamText({
     model: await getChatModel(userId, modelSpec ?? undefined),
-    system: OPERON_SYSTEM_PROMPT,
+    tools,
+    system: systemPrompt,
     messages: modelMessages,
     providerOptions: reasoningProviderOptions(providerIdFromSpec(modelSpec), reasoningLevel),
     stopWhen: stepCountIs(8),
@@ -140,6 +157,21 @@ export async function POST(req: Request) {
     // some OpenAI-compatible gateways) otherwise look like blocking UIs.
     // smoothStream rechunks the stream so the UI shows a typewriter effect.
     experimental_transform: smoothStream({ delayInMs: 18, chunking: "word" }),
+    experimental_onToolCallFinish: async (event) => {
+      await appendLog({
+        userId,
+        level: event.success ? "info" : "error",
+        source: "ai-tool",
+        message: event.success ? "Tool call completed" : "Tool call failed",
+        metadata: {
+          conversationId,
+          tool: event.toolCall.toolName,
+          durationMs: event.durationMs,
+          success: event.success,
+          error: event.success ? undefined : event.error instanceof Error ? event.error.message : String(event.error),
+        },
+      });
+    },
   });
 
   return result.toUIMessageStreamResponse({
@@ -147,20 +179,27 @@ export async function POST(req: Request) {
     sendReasoning: true,
     sendSources: true,
     onFinish: async ({ responseMessage }) => {
-      if (!conversationId) return;
-      await appendMessage(conversationId, userId, {
-        role: "assistant",
-        content: textFromParts(responseMessage.parts),
-        createdAt: new Date().toISOString(),
-        parts: responseMessage.parts as unknown[],
-      });
-      await appendLog({
-        userId,
-        level: "info",
-        source: "chat",
-        message: "Assistant message persisted",
-        metadata: { conversationId, parts: responseMessage.parts.length },
-      });
+      const assistantText = textFromParts(responseMessage.parts);
+      if (conversationId) {
+        await appendMessage(conversationId, userId, {
+          role: "assistant",
+          content: assistantText,
+          createdAt: new Date().toISOString(),
+          parts: responseMessage.parts as unknown[],
+        });
+        await appendLog({
+          userId,
+          level: "info",
+          source: "chat",
+          message: "Assistant message persisted",
+          metadata: { conversationId, parts: responseMessage.parts.length },
+        });
+      }
+      if (persona.memoryEnabled && lastUserText) {
+        // Fire-and-forget: do not block stream completion on extraction.
+        const isFirstMessage = messages.filter((m) => m.role === "user").length === 1;
+        void autoExtractMemory({ userId, userText: lastUserText, assistantText, isFirstMessage });
+      }
     },
   });
 }

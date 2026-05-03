@@ -27,6 +27,8 @@ export const collections = {
   logs: <TSchema extends Document = Document>() => collection<TSchema>("logs"),
   uploads: <TSchema extends Document = Document>() => collection<TSchema>("uploads"),
   authProfiles: <TSchema extends Document = Document>() => collection<TSchema>("authProfiles"),
+  memories: <TSchema extends Document = Document>() => collection<TSchema>("memories"),
   userSettings: <TSchema extends Document = Document>() => collection<TSchema>("userSettings"),
   users: <TSchema extends Document = Document>() => collection<TSchema>("users"),
+  mcpServers: <TSchema extends Document = Document>() => collection<TSchema>("mcpServers"),
 };

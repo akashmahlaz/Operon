@@ -8,6 +8,7 @@ import { collections } from "@/lib/db-collections"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: MongoDBAdapter(client),
+  trustHost: true,
   providers: [
     Google,
     Credentials({

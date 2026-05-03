@@ -167,18 +167,21 @@ function ChatPage() {
           .join("") || undefined,
       toolCalls: toolParts.map((p) => {
         const pp = p as {
+          type?: string;
           toolName?: string;
           state?: string;
           input?: Record<string, unknown>;
           output?: unknown;
+          errorText?: string;
         };
+        const toolName = pp.toolName || (pp.type?.startsWith("tool-") ? pp.type.slice(5) : "tool");
         const isDone = pp.output !== undefined || pp.state === "output-available";
         return {
           type: "tool-invocation" as const,
-          toolName: pp.toolName || "tool",
-          state: isDone ? ("output-available" as const) : ("calling" as const),
+          toolName,
+          state: pp.errorText ? ("output-error" as const) : isDone ? ("output-available" as const) : (pp.state as "input-streaming" | "input-available" | undefined) || ("calling" as const),
           args: pp.input,
-          result: pp.output,
+          result: pp.output ?? pp.errorText,
         };
       }),
     };
