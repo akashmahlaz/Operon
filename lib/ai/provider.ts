@@ -20,9 +20,10 @@ const OPENAI_COMPATIBLE_BASE_URLS: Record<string, string> = {
   qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
 };
 
-export async function getChatModel(userId?: string, modelSpec?: string) {
+export async function getChatModel(userId?: string, modelSpec?: string, personaModel?: string) {
   const settings = userId ? await getUserSettings(userId) : null;
-  const spec = modelSpec || settings?.defaultModel || `minimax/${DEFAULT_CHAT_MODEL}`;
+  // Priority: explicit modelSpec > persona model override > user defaultModel > global default
+  const spec = modelSpec || personaModel || settings?.defaultModel || `minimax/${DEFAULT_CHAT_MODEL}`;
   const slashIndex = spec.indexOf("/");
   const [providerId, rawModelId] = slashIndex >= 0
     ? [spec.slice(0, slashIndex), spec.slice(slashIndex + 1)]

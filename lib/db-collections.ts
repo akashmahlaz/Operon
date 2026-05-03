@@ -31,4 +31,5 @@ export const collections = {
   userSettings: <TSchema extends Document = Document>() => collection<TSchema>("userSettings"),
   users: <TSchema extends Document = Document>() => collection<TSchema>("users"),
   mcpServers: <TSchema extends Document = Document>() => collection<TSchema>("mcpServers"),
+  workspaceFiles: <TSchema extends Document = Document>() => collection<TSchema>("workspaceFiles"),
 };

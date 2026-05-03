@@ -14,10 +14,31 @@ export type LanguagePreference = "en" | "hi" | "hinglish" | "auto";
 export type MemoryDepth = "7d" | "30d" | "90d" | "forever";
 
 export interface PersonaSettings {
+  // Identity
   aiName: string;
   userNickname?: string;
+  /** Optional: override the default AI model for this user */
+  model?: string;
+  /** Optional: custom system prompt tail appended per user */
+  systemPromptTail?: string;
+
+  // Model parameters
+  /** Sampling temperature 0–2 (0.8 = default) */
+  temperature?: number;
+  /** Nucleus sampling threshold 0–1 */
+  topP?: number;
+  /** Frequency penalty -2–2 */
+  frequencyPenalty?: number;
+  /** Presence penalty -2–2 */
+  presencePenalty?: number;
+  /** Max tokens per response (0 = no override) */
+  maxTokens?: number;
+
+  // Communication
   communicationStyle: CommunicationStyle;
   languagePreference: LanguagePreference;
+
+  // Memory
   memoryEnabled: boolean;
   memoryDepth: MemoryDepth;
   proactiveEnabled: boolean;
@@ -26,6 +47,8 @@ export interface PersonaSettings {
   expressiveReplies: boolean;
   voiceNotes: boolean;
   timezone?: string;
+
+  // Channel overrides (e.g. whatsapp gets a shorter, punchier config)
   channelOverrides?: Partial<Record<string, Partial<PersonaSettings>>>;
 }
 
@@ -41,6 +64,13 @@ export const DEFAULT_PERSONA: PersonaSettings = {
   briefingTime: "09:00",
   expressiveReplies: false,
   voiceNotes: false,
+  model: undefined,
+  temperature: undefined,
+  topP: undefined,
+  maxTokens: undefined,
+  frequencyPenalty: undefined,
+  presencePenalty: undefined,
+  systemPromptTail: undefined,
 };
 
 export interface StoredUserSettings extends Document {
@@ -134,6 +164,14 @@ export function normalizePersona(input: Partial<PersonaSettings> | null | undefi
     expressiveReplies: source.expressiveReplies === true,
     voiceNotes: source.voiceNotes === true,
     timezone: typeof source.timezone === "string" ? source.timezone.slice(0, 64) : undefined,
+    // Model params — preserve undefined if not set
+    model: typeof source.model === "string" && source.model.length > 0 ? source.model : undefined,
+    temperature: typeof source.temperature === "number" ? source.temperature : undefined,
+    topP: typeof source.topP === "number" ? source.topP : undefined,
+    maxTokens: typeof source.maxTokens === "number" && source.maxTokens > 0 ? source.maxTokens : undefined,
+    frequencyPenalty: typeof source.frequencyPenalty === "number" ? source.frequencyPenalty : undefined,
+    presencePenalty: typeof source.presencePenalty === "number" ? source.presencePenalty : undefined,
+    systemPromptTail: typeof source.systemPromptTail === "string" ? source.systemPromptTail : undefined,
   };
 }
 
@@ -199,6 +237,9 @@ export function buildPersonaSystemPrompt(persona: PersonaSettings): string {
   }
   if (persona.timezone) {
     lines.push(`User timezone: ${persona.timezone}.`);
+  }
+  if (persona.systemPromptTail) {
+    lines.push("\n" + persona.systemPromptTail);
   }
   return lines.join(" ");
 }

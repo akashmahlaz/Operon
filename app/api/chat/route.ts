@@ -136,26 +136,61 @@ export async function POST(req: Request) {
   const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
   const lastUserText = lastUserMessage ? textFromParts(lastUserMessage.parts) : "";
   const persona = await getPersonaForChannel(userId, body.channel ?? "web");
-  const [memoryContext, capabilitySnapshot] = await Promise.all([
+  const [memoryContext, snap] = await Promise.all([
     persona.memoryEnabled
       ? memory.context(userId, lastUserText, 8, { depth: persona.memoryDepth })
       : Promise.resolve(""),
     buildCapabilitySnapshot(userId),
   ]);
+
+  // Build dynamic prefix: inject top memories + first-run directive + workspace files
+  // Note: workspaceFilesSection is already embedded in snap.text (OPERATOR CONTEXT block)
+  const isFirstConversation = snap.conversationCount === 0;
+  const hasStoredMemory = snap.memoryCount > 0;
+  const dynamicPrefixParts: string[] = [snap.text];
+
+  if (isFirstConversation && hasStoredMemory) {
+    // First conversation but has memory — user returned after wipe or new session
+    dynamicPrefixParts.push(
+      `\nNote: This operator has ${snap.memoryCount} prior memory fact(s) stored — but no conversation history. ` +
+      "This means you've met before. Try to recall relevant facts naturally."
+    );
+  }
+
+  if (snap.topMemories.length > 0) {
+    dynamicPrefixParts.push(
+      "Key things you already know about this operator:\n" + snap.topMemories.join("\n")
+    );
+  }
+
+  if (isFirstConversation) {
+    const name = persona.userNickname || null;
+    if (name) {
+      dynamicPrefixParts.push(
+        `FIRST-RUN: Greet the operator by name ("Hey ${name} — welcome back"). You know their name.`
+      );
+    } else {
+      dynamicPrefixParts.push(
+        "FIRST-RUN: Warmly introduce yourself as Operon. Ask what to call them, then use that name going forward."
+      );
+    }
+  }
+
+  const capabilitySnapshot = dynamicPrefixParts.join("\n");
   const personaPrompt = buildPersonaSystemPrompt(persona);
   const systemPrompt = [OPERON_SYSTEM_PROMPT, capabilitySnapshot, personaPrompt, memoryContext].filter(Boolean).join("\n\n");
   const tools = await buildAvailableTools(userId);
 
   const result = streamText({
-    model: await getChatModel(userId, modelSpec ?? undefined),
+    model: await getChatModel(userId, modelSpec ?? undefined, persona.model),
     tools,
     system: systemPrompt,
     messages: modelMessages,
     providerOptions: reasoningProviderOptions(providerIdFromSpec(modelSpec), reasoningLevel),
+    temperature: persona.temperature,
+    topP: persona.topP,
+    maxOutputTokens: persona.maxTokens && persona.maxTokens > 0 ? persona.maxTokens : undefined,
     stopWhen: stepCountIs(8),
-    // Word-level smoothing: providers that emit large chunks (e.g. minimax,
-    // some OpenAI-compatible gateways) otherwise look like blocking UIs.
-    // smoothStream rechunks the stream so the UI shows a typewriter effect.
     experimental_transform: smoothStream({ delayInMs: 18, chunking: "word" }),
     experimental_onToolCallFinish: async (event) => {
       await appendLog({

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { BookOpen, Brain, MessageCircle, Palette, Save, Sparkles, Trash2, User, Zap } from "lucide-react";
+import { BookOpen, Brain, FileText, MessageCircle, Palette, Save, Sparkles, Trash2, User, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +23,9 @@ type PersonaState = {
   briefingTime: string;
   expressiveReplies: boolean;
   voiceNotes: boolean;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
 };
 
 type MemoryFact = {
@@ -52,6 +55,9 @@ const DEFAULT_STATE: PersonaState = {
   briefingTime: "09:00",
   expressiveReplies: false,
   voiceNotes: false,
+  model: undefined,
+  temperature: undefined,
+  maxTokens: undefined,
 };
 
 function importanceBadge(importance?: number) {
@@ -79,6 +85,8 @@ export function PersonaSettings() {
   const [memories, setMemories] = useState<MemoryFact[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [wsFiles, setWsFiles] = useState<{ bootstrap: string; soul: string; user: string }>({ bootstrap: "", soul: "", user: "" });
+  const [wsFilesLoading, setWsFilesLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +113,23 @@ export function PersonaSettings() {
 
   useEffect(() => { loadMemories(); }, [loadMemories]);
 
+  // Load workspace files
+  useEffect(() => {
+    setWsFilesLoading(true);
+    fetch("/api/workspace-files")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data?.files) return;
+        setWsFiles({
+          bootstrap: data.files.bootstrap ?? "",
+          soul: data.files.soul ?? "",
+          user: data.files.user ?? "",
+        });
+      })
+      .catch(() => {})
+      .finally(() => setWsFilesLoading(false));
+  }, []);
+
   async function save() {
     setSaving(true);
     try {
@@ -122,6 +147,34 @@ export function PersonaSettings() {
       toast.success("Personalization saved — takes effect on your next message");
     } catch {
       toast.error("Could not save personalization");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveWorkspaceFiles() {
+    setSaving(true);
+    try {
+      await Promise.all([
+        fetch("/api/workspace-files", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "bootstrap", content: wsFiles.bootstrap }),
+        }),
+        fetch("/api/workspace-files", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "soul", content: wsFiles.soul }),
+        }),
+        fetch("/api/workspace-files", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "user", content: wsFiles.user }),
+        }),
+      ]);
+      toast.success("Workspace files saved");
+    } catch {
+      toast.error("Could not save workspace files");
     } finally {
       setSaving(false);
     }
@@ -188,6 +241,23 @@ export function PersonaSettings() {
               <Label className="text-sm font-medium">What should AI call you?</Label>
               <Input value={persona.userNickname} onChange={(event) => setPersona({ ...persona, userNickname: event.target.value })} placeholder="e.g. Akash, Boss, Yaar" className="rounded-xl" />
               <p className="text-[11px] text-muted-foreground">The AI will address you by this name in every message.</p>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Model Override</Label>
+              <Input value={persona.model ?? ""} onChange={(event) => setPersona({ ...persona, model: event.target.value })} placeholder="e.g. anthropic/claude-sonnet-4-5" className="rounded-xl" />
+              <p className="text-[11px] text-muted-foreground">Leave blank to use workspace default.</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Temperature ({persona.temperature ?? 0.8})</Label>
+              <Input type="range" min="0" max="2" step="0.05" value={persona.temperature ?? 0.8} onChange={(event) => setPersona({ ...persona, temperature: parseFloat(event.target.value) })} className="py-1" />
+              <p className="text-[11px] text-muted-foreground">0 = focused, 2 = creative</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Max Tokens (0 = no limit)</Label>
+              <Input type="number" min="0" max="8192" value={persona.maxTokens ?? 0} onChange={(event) => setPersona({ ...persona, maxTokens: parseInt(event.target.value) || 0 })} className="rounded-xl" />
+              <p className="text-[11px] text-muted-foreground">0 = unlimited</p>
             </div>
           </div>
         </CardContent>
@@ -380,6 +450,68 @@ export function PersonaSettings() {
                 </div>
               ))}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Workspace files: BOOTSTRAP / SOUL / USER */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <FileText className="size-4 text-primary" />
+            <CardTitle className="text-base">Workspace Files</CardTitle>
+          </div>
+          <CardDescription>
+            <span className="font-semibold">BOOTSTRAP.md</span> — operational rules (apply always).{" "}
+            <span className="font-semibold">SOUL.md</span> — personality &amp; voice.{" "}
+            <span className="font-semibold">USER.md</span> — learned facts about you.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {wsFilesLoading ? (
+            <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+              <span className="size-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              Loading workspace files...
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">BOOTSTRAP.md — Operational Rules</Label>
+                <p className="text-[11px] text-muted-foreground">Loaded first. Use for: preferred tools, workflow rules, hard constraints. Apply always.</p>
+                <textarea
+                  className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={wsFiles.bootstrap}
+                  onChange={(e) => setWsFiles((f) => ({ ...f, bootstrap: e.target.value }))}
+                  placeholder={"e.g. Always check GitHub before answering questions about repos\nNever send more than 3 tool calls in one turn"}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">SOUL.md — Personality &amp; Voice</Label>
+                <p className="text-[11px] text-muted-foreground">Loaded second. Use for: communication style, tone, phrases to use or avoid.</p>
+                <textarea
+                  className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={wsFiles.soul}
+                  onChange={(e) => setWsFiles((f) => ({ ...f, soul: e.target.value }))}
+                  placeholder={"e.g. Be concise and direct. Use short paragraphs.\nAvoid emojis unless the user uses them first."}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">USER.md — Learned Facts</Label>
+                <p className="text-[11px] text-muted-foreground">Operon writes facts here when you tell it about yourself. Edit to add or correct.</p>
+                <textarea
+                  className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={wsFiles.user}
+                  onChange={(e) => setWsFiles((f) => ({ ...f, user: e.target.value }))}
+                  placeholder={"e.g. Akash works primarily in TypeScript and Rust.\nPreferred response length: medium (1-2 paragraphs)."}
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={saveWorkspaceFiles} disabled={saving} variant="outline" className="gap-2 rounded-xl px-4">
+                  {saving ? <span className="size-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Save className="size-3.5" />}
+                  {saving ? "Saving..." : "Save Workspace Files"}
+                </Button>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
