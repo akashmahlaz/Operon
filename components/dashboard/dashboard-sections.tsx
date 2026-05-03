@@ -85,6 +85,69 @@ function VSCodeIcon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Microsoft four-square logo — official brand colors from microsoft.com/en-us/about/brand.
+ * Red #F25022 | Green #7FBA00 | Blue #00A4EF | Yellow #FFB900
+ */
+function MicrosoftIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <rect x="1"  y="1"  width="10.5" height="10.5" fill="#F25022" />
+      <rect x="12.5" y="1"  width="10.5" height="10.5" fill="#7FBA00" />
+      <rect x="1"  y="12.5" width="10.5" height="10.5" fill="#00A4EF" />
+      <rect x="12.5" y="12.5" width="10.5" height="10.5" fill="#FFB900" />
+    </svg>
+  );
+}
+
+/**
+ * Telegram paper-plane logo — official brand color #26A5E4.
+ * Path sourced from Simple Icons (MIT).
+ */
+function TelegramIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="12" fill="#26A5E4" />
+      <path
+        d="M5.491 11.74 18.3 6.86c.6-.217 1.124.146.928.998l-2.149 10.16c-.16.754-.617.937-1.25.583l-3.4-2.507-1.64 1.578c-.18.18-.332.332-.682.332l.243-3.437 6.27-5.664c.272-.243-.06-.377-.42-.134L7.67 14.042l-3.33-1.04c-.723-.226-.738-.723.152-1.262z"
+        fill="white"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Notion logo — black square with the tilted "N" letterform.
+ * Path sourced from Simple Icons (MIT). Brand color: #000000.
+ */
+function NotionIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.934.653.934 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.047-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.447-1.632z"
+        fill="#000000"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Salesforce cloud logo — brand color #00A1E0.
+ * Path sourced from Simple Icons (MIT).
+ */
+function SalesforceIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M10.006 5.415a4.195 4.195 0 013.045-1.306c1.56 0 2.954.9 3.69 2.205.63-.3 1.35-.45 2.1-.45 2.85 0 5.159 2.34 5.159 5.22s-2.31 5.22-5.176 5.22c-.345 0-.69-.044-1.02-.104a3.75 3.75 0 01-3.3 1.95c-.6 0-1.155-.15-1.65-.375A4.314 4.314 0 018.88 20.4a4.302 4.302 0 01-4.05-2.82c-.27.062-.54.076-.825.076-2.204 0-4.005-1.8-4.005-4.05 0-1.5.811-2.805 2.01-3.51-.255-.57-.39-1.2-.39-1.846 0-2.58 2.1-4.65 4.65-4.65 1.53 0 2.85.705 3.72 1.8"
+        fill="#00A1E0"
+        stroke="#00A1E0"
+        strokeWidth="0.5"
+      />
+    </svg>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Section type
 // ─────────────────────────────────────────────────────────────────
@@ -143,6 +206,38 @@ export const primaryDashboardSections = [
     href: "/dashboard/coding",
     bg: "bg-[#007ACC]/8",
     text: "text-[#007ACC]",
+  },
+  {
+    id: "microsoft",
+    icon: MicrosoftIcon,
+    label: "Microsoft",
+    href: "/dashboard/microsoft",
+    bg: "bg-[#00A4EF]/8",
+    text: "text-[#00A4EF]",
+  },
+  {
+    id: "messaging",
+    icon: TelegramIcon,
+    label: "Messaging",
+    href: "/dashboard/messaging",
+    bg: "bg-[#26A5E4]/8",
+    text: "text-[#26A5E4]",
+  },
+  {
+    id: "projects",
+    icon: NotionIcon,
+    label: "Projects",
+    href: "/dashboard/projects",
+    bg: "bg-zinc-900/8",
+    text: "text-zinc-800",
+  },
+  {
+    id: "crm",
+    icon: SalesforceIcon,
+    label: "CRM",
+    href: "/dashboard/crm",
+    bg: "bg-[#00A1E0]/8",
+    text: "text-[#00A1E0]",
   },
 ] as const satisfies readonly DashboardSection[];
 
