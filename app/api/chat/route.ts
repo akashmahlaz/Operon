@@ -176,9 +176,24 @@ export async function POST(req: Request) {
     }
   }
 
-  const capabilitySnapshot = dynamicPrefixParts.join("\n");
+const capabilitySnapshot = dynamicPrefixParts.join("\n");
   const personaPrompt = buildPersonaSystemPrompt(persona);
-  const systemPrompt = [OPERON_SYSTEM_PROMPT, capabilitySnapshot, personaPrompt, memoryContext].filter(Boolean).join("\n\n");
+
+  // Inject current date/time using the user's saved timezone
+  const tz = persona.timezone || "UTC";
+  let dateTimeContext = "";
+  try {
+    const now = new Date();
+    const localTime = now.toLocaleString("en-US", {
+      timeZone: tz,
+      weekday: "short", year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    const utcTime = now.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+    dateTimeContext = `DATE/TIME CONTEXT:\n- User's local time: ${localTime} (${tz})\n- UTC: ${utcTime}`;
+  } catch { /* invalid tz — skip */ }
+
+  const systemPrompt = [OPERON_SYSTEM_PROMPT, capabilitySnapshot, dateTimeContext, personaPrompt, memoryContext].filter(Boolean).join("\n\n");
   const tools = await buildAvailableTools(userId);
 
   const result = streamText({

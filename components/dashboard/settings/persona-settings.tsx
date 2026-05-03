@@ -26,6 +26,7 @@ type PersonaState = {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  timezone?: string;
 };
 
 type MemoryFact = {
@@ -43,6 +44,12 @@ const CHANNEL_LABELS: Record<string, string> = {
   web: "Web Chat",
 };
 
+/** Detected at module load time (client only) — used as timezone fallback */
+function detectBrowserTimezone(): string | undefined {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; }
+}
+const BROWSER_TZ = typeof window !== "undefined" ? detectBrowserTimezone() : undefined;
+
 const DEFAULT_STATE: PersonaState = {
   aiName: "Operon",
   userNickname: "",
@@ -58,6 +65,7 @@ const DEFAULT_STATE: PersonaState = {
   model: undefined,
   temperature: undefined,
   maxTokens: undefined,
+  timezone: undefined,
 };
 
 function importanceBadge(importance?: number) {
@@ -94,7 +102,7 @@ export function PersonaSettings() {
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (cancelled || !data?.persona) return;
-        setPersona({ ...DEFAULT_STATE, ...data.persona, userNickname: data.persona.userNickname ?? "" });
+        setPersona({ ...DEFAULT_STATE, ...data.persona, userNickname: data.persona.userNickname ?? "", timezone: data.persona.timezone || BROWSER_TZ });
         setChannelOverrides((data.persona.channelOverrides as Record<string, Partial<PersonaState>>) ?? {});
       })
       .catch(() => {})
@@ -134,7 +142,7 @@ export function PersonaSettings() {
       if (!response.ok) throw new Error("failed");
       const data = await response.json();
       if (data?.persona) {
-        setPersona({ ...DEFAULT_STATE, ...data.persona, userNickname: data.persona.userNickname ?? "" });
+        setPersona({ ...DEFAULT_STATE, ...data.persona, userNickname: data.persona.userNickname ?? "", timezone: data.persona.timezone || BROWSER_TZ });
         setChannelOverrides((data.persona.channelOverrides as Record<string, Partial<PersonaState>>) ?? {});
       }
       toast.success("Personalization saved — takes effect on your next message");
@@ -188,9 +196,11 @@ export function PersonaSettings() {
   }
 
   function setChannelOverride(channel: string, field: keyof PersonaState, value: string) {
+    // "__none__" is the sentinel for "same as global" (Radix Select forbids empty string values)
+    const actual = value === "__none__" ? "" : value;
     setChannelOverrides((prev) => ({
       ...prev,
-      [channel]: { ...(prev[channel] ?? {}), [field]: value },
+      [channel]: { ...(prev[channel] ?? {}), [field]: actual },
     }));
   }
 
@@ -251,6 +261,13 @@ export function PersonaSettings() {
               <Label className="text-sm font-medium">Max Tokens (0 = no limit)</Label>
               <Input type="number" min="0" max="8192" value={persona.maxTokens ?? 0} onChange={(event) => setPersona({ ...persona, maxTokens: parseInt(event.target.value) || 0 })} className="rounded-xl" />
               <p className="text-[11px] text-muted-foreground">0 = unlimited</p>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Your Timezone</Label>
+              <Input value={persona.timezone ?? ""} onChange={(event) => setPersona({ ...persona, timezone: event.target.value })} placeholder="e.g. Asia/Kolkata" className="rounded-xl" />
+              <p className="text-[11px] text-muted-foreground">Auto-detected from your browser. Lets Operon know your local time in every reply.</p>
             </div>
           </div>
         </CardContent>
@@ -332,12 +349,12 @@ export function PersonaSettings() {
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Personality override</Label>
                   <Select
-                    value={channelOverrides[channel]?.communicationStyle ?? ""}
+                    value={channelOverrides[channel]?.communicationStyle || "__none__"}
                     onValueChange={(v) => setChannelOverride(channel, "communicationStyle", v)}
                   >
                     <SelectTrigger className="rounded-xl text-sm"><SelectValue placeholder="Same as global" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Same as global</SelectItem>
+                      <SelectItem value="__none__">Same as global</SelectItem>
                       <SelectItem value="friendly">Friendly & Warm</SelectItem>
                       <SelectItem value="professional">Professional</SelectItem>
                       <SelectItem value="balanced">Balanced</SelectItem>
@@ -350,12 +367,12 @@ export function PersonaSettings() {
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Language override</Label>
                   <Select
-                    value={channelOverrides[channel]?.languagePreference ?? ""}
+                    value={channelOverrides[channel]?.languagePreference || "__none__"}
                     onValueChange={(v) => setChannelOverride(channel, "languagePreference", v)}
                   >
                     <SelectTrigger className="rounded-xl text-sm"><SelectValue placeholder="Same as global" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Same as global</SelectItem>
+                      <SelectItem value="__none__">Same as global</SelectItem>
                       <SelectItem value="en">English</SelectItem>
                       <SelectItem value="hi">Hindi</SelectItem>
                       <SelectItem value="hinglish">Hinglish</SelectItem>

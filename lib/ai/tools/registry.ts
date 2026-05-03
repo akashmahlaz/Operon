@@ -1,6 +1,7 @@
 import type { Tool } from "ai";
 import { createGitHubTools } from "@/lib/ai/tools/github";
 import { createMemoryTools } from "@/lib/ai/tools/memory";
+import { createWorkspaceFileTools } from "@/lib/ai/tools/workspace-file";
 import { getMcpTools } from "@/lib/ai/mcp-client";
 import { getAuthProfile } from "@/lib/services/auth-profiles";
 
@@ -31,6 +32,12 @@ const REGISTRY: ToolDescriptor[] = [
     category: "memory",
     description: "Long-term memory: remember and recall stable preferences and facts.",
     build: (userId) => createMemoryTools(userId) as Record<string, Tool>,
+  },
+  {
+    name: "workspace_files",
+    category: "memory",
+    description: "Read and write workspace files (BOOTSTRAP.md / SOUL.md / USER.md). Use workspace_file_write to build the operator's permanent profile.",
+    build: (userId) => createWorkspaceFileTools(userId) as Record<string, Tool>,
   },
   {
     name: "github",
