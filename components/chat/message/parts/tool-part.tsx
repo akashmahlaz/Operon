@@ -4,7 +4,6 @@ import {
   Circle,
   FileCode2,
   GitBranch,
-  Github,
   Loader2,
   MessageSquareText,
   PencilLine,
@@ -62,7 +61,7 @@ function toolIcon(toolName: string, state: ToolCallPart["state"]) {
 
   if (pending) return Loader2;
   if (error) return AlertCircle;
-  if (toolName.includes("github")) return Github;
+  if (toolName.includes("github")) return GitBranch;
   if (toolName.includes("search")) return Search;
   if (toolName.includes("write") || toolName.includes("edit") || toolName.includes("push")) return PencilLine;
   if (toolName.includes("file") || toolName.includes("code")) return FileCode2;

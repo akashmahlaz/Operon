@@ -1,7 +1,7 @@
 // Renders a tool invocation badge. Accepts either { toolName, state } at
 // the root, or the older { toolInvocation: { toolName, state } } envelope.
 
-import { AlertCircle, Check, FileCode2, Github, Loader2, MessageSquareText, PencilLine, Search } from "lucide-react";
+import { AlertCircle, Check, FileCode2, GitBranch, Loader2, MessageSquareText, PencilLine, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const toolLabels: Record<string, string> = {
@@ -36,7 +36,7 @@ function toToolLike(value: unknown): ToolLike {
 function toolIcon(toolName: string, isPending: boolean, isError: boolean) {
   if (isPending) return Loader2;
   if (isError) return AlertCircle;
-  if (toolName.includes("github")) return Github;
+  if (toolName.includes("github")) return GitBranch;
   if (toolName.includes("search")) return Search;
   if (toolName.includes("write") || toolName.includes("edit")) return PencilLine;
   if (toolName.includes("file") || toolName.includes("code")) return FileCode2;
