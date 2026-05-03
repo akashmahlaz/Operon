@@ -12,10 +12,10 @@ export default function TextPart({
   return (
     <div
       className={cn(
-        "max-w-[85%] rounded-2xl px-4 py-3 text-[13px] leading-relaxed whitespace-pre-wrap",
+        "max-w-[85%] text-[13px] leading-relaxed whitespace-pre-wrap",
         isUser
-          ? "rounded-tr-sm bg-foreground text-background"
-          : "rounded-tl-sm border border-border/80 bg-card shadow-sm text-foreground",
+          ? "rounded-2xl rounded-tr-sm bg-foreground px-4 py-3 text-background"
+          : "text-foreground",
       )}
     >
       {text}

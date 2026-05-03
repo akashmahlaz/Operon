@@ -5,9 +5,10 @@ import { cn } from "@/lib/utils";
 interface TextPartProps {
   text: string;
   isUser?: boolean;
+  streaming?: boolean;
 }
 
-export function TextPart({ text, isUser }: TextPartProps) {
+export function TextPart({ text, isUser, streaming }: TextPartProps) {
   if (!text) return null;
 
   if (isUser) {
@@ -31,6 +32,9 @@ export function TextPart({ text, isUser }: TextPartProps) {
       )}
     >
       <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+      {streaming && (
+        <span className="ml-0.5 inline-block w-0.5 h-4 bg-foreground align-text-bottom animate-(--animate-blink)" />
+      )}
     </div>
   );
 }

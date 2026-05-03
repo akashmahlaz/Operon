@@ -9,7 +9,6 @@ import { FilePartList } from "@/components/chat/message/parts/file-part";
 import { ReasoningPart } from "@/components/chat/message/parts/reasoning-part";
 import { TextPart } from "@/components/chat/message/parts/text-part";
 import { getToolLabel, ToolPartList } from "@/components/chat/message/parts/tool-part";
-import { cn } from "@/lib/utils";
 
 const ATTACHMENT_RE = /\[(Image|File):\s*([^\]]+)\]\(([^)]+)\)/g;
 
@@ -47,15 +46,19 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function AssistantAvatar({ active }: { active?: boolean }) {
+function AssistantAvatar() {
   return (
-    <div
-      className={cn(
-        "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-transparent ring-1 ring-border/70 transition-transform duration-300 group-hover:scale-105",
-        active && "animate-pulse ring-primary/30",
-      )}
-    >
-      <OperonMark className="size-5 rounded-md bg-transparent text-foreground" />
+    <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center">
+      <OperonMark className="size-4.5 text-foreground" />
+    </div>
+  );
+}
+
+function AssistantLabel() {
+  return (
+    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground/65">
+      <span>Operon</span>
+      <span className="h-px w-3 bg-border/70" />
     </div>
   );
 }
@@ -74,9 +77,10 @@ function PendingAssistantMessage({ thinking, isStreaming }: { thinking?: string;
   // Render the assistant placeholder immediately so the UI is streaming-shaped
   // (per AI SDK Streaming UI guidance) even before the first chunk arrives.
   return (
-    <div className="flex max-w-3xl items-start gap-3 py-3">
-      <AssistantAvatar active={isStreaming} />
+    <div className="flex max-w-3xl items-start gap-2.5 py-3">
+      <AssistantAvatar />
       <div className="min-w-0 flex-1">
+        <AssistantLabel />
         {thinking ? (
           <ReasoningPart text={thinking} streaming={isStreaming} />
         ) : (
@@ -125,16 +129,17 @@ function AssistantMessage({ message, isLast, isLoading }: { message: ChatDisplay
   const showWaitingForText = isStreamingThis && !message.content;
 
   return (
-    <div className="group flex max-w-3xl items-start gap-3 py-3">
-      <AssistantAvatar active={isStreamingThis} />
+    <div className="group flex max-w-3xl items-start gap-2.5 py-3">
+      <AssistantAvatar />
       <div className="min-w-0 flex-1">
+        <AssistantLabel />
         <div className="space-y-2">
           {reasoningText && (
             <ReasoningPart text={reasoningText} streaming={isStreamingThis} />
           )}
           <ToolPartList tools={message.toolCalls} />
           {message.content ? (
-            <TextPart text={message.content} />
+            <TextPart text={message.content} streaming={isStreamingThis} />
           ) : null}
           {showWaitingForText && !reasoningText && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

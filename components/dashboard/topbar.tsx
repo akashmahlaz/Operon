@@ -16,7 +16,7 @@ export function DashboardTopbar({ title, subtitle, actions }: DashboardTopbarPro
   const { theme, setTheme } = useTheme();
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border/60 bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border/60 bg-background/95 px-3 backdrop-blur supports-backdrop-filter:bg-background/60">
       <div className="flex min-w-0 flex-1 flex-col leading-tight">
         {title && <span className="truncate text-sm font-medium">{title}</span>}
         {subtitle && (

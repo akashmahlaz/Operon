@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { useEffect, useRef } from "react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { OperonMark } from "@/components/brand";
 import { cn } from "@/lib/utils";
 import TextPart from "./parts/textPart";
 import ReasoningPart from "./parts/ai-reasoning";
@@ -24,18 +24,21 @@ type ChatMessage = {
 
 function MessageAvatar({ role }: { role: string }) {
   const isUser = role === "user";
+  if (isUser) return null;
+
   return (
-    <Avatar className="h-8 w-8 shrink-0 rounded-xl border border-border/40">
-      <AvatarFallback
-        className={cn(
-          "rounded-xl text-[11px] font-semibold",
-          isUser ? "bg-muted text-foreground/80" : "bg-foreground text-background",
-        )}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        {isUser ? "U" : <img src="/logo.png" alt="Operon" className="h-3.5 w-3.5 object-contain mix-blend-multiply dark:mix-blend-normal dark:brightness-0 dark:invert" />}
-      </AvatarFallback>
-    </Avatar>
+    <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center">
+      <OperonMark className="size-4.5 text-foreground" />
+    </div>
+  );
+}
+
+function AssistantLabel() {
+  return (
+    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground/65">
+      <span>Operon</span>
+      <span className="h-px w-3 bg-border/70" />
+    </div>
   );
 }
 
@@ -61,7 +64,7 @@ function PartRenderer({ part, role }: { part: ChatPart; role: string }) {
 function MessageRow({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
-    <div className={cn("flex gap-3", isUser && "flex-row-reverse")}>
+    <div className={cn("flex gap-2.5", isUser && "flex-row-reverse")}>
       <MessageAvatar role={message.role} />
       <div
         className={cn(
@@ -69,6 +72,7 @@ function MessageRow({ message }: { message: ChatMessage }) {
           isUser ? "items-end" : "items-start",
         )}
       >
+        {!isUser && <AssistantLabel />}
         {message.parts?.map((part, i) => (
           <PartRenderer key={i} part={part} role={message.role} />
         ))}
