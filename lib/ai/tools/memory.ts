@@ -29,5 +29,16 @@ export function createMemoryTools(userId: string) {
         return { memory: await memory.add(userId, { content, source: source || "chat", kind, importance }) };
       },
     }),
+    memory_forget: tool({
+      description: "Delete a specific memory fact by its id. Use this to remove stale, incorrect, or outdated facts. Always search first to find the id.",
+      inputSchema: z.object({
+        id: z.string().min(1).describe("The id of the memory fact to delete (from memory_search results)."),
+      }),
+      execute: async ({ id }) => {
+        await memory.remove(userId, id);
+        await appendLog({ userId, level: "info", source: "ai-tool", message: "Memory deleted", metadata: { tool: "memory_forget", id } });
+        return { ok: true, deleted: id };
+      },
+    }),
   };
 }

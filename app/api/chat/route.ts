@@ -1,4 +1,5 @@
-import { smoothStream, stepCountIs, streamText, type UIMessage } from "ai";
+import { smoothStream, stepCountIs, streamText, type UIMessage, generateObject } from "ai";
+import { z } from "zod";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { textFromParts, toModelMessages } from "@/lib/ai/convert";
@@ -8,11 +9,33 @@ import { buildAvailableTools } from "@/lib/ai/tools/registry";
 import { autoExtractMemory } from "@/lib/ai/memory-extractor";
 import { memory } from "@/lib/memory";
 import { buildPersonaSystemPrompt, getPersonaForChannel } from "@/lib/services/user-settings";
-import { appendMessage, createConversation, deleteConversation, getConversation, listConversations } from "@/lib/services/chat-store";
+import { appendMessage, createConversation, deleteConversation, getConversation, listConversations, updateConversationTitle } from "@/lib/services/chat-store";
 import { appendLog } from "@/lib/services/logs";
 import type { Channel } from "@/lib/types";
 
 export const maxDuration = 60;
+
+/** Generate a short 4-6 word conversation title from the first exchange. */
+async function generateConversationTitle(
+  userId: string,
+  userText: string,
+  assistantText: string,
+): Promise<string | null> {
+  try {
+    const result = await generateObject({
+      model: await getChatModel(userId),
+      schema: z.object({ title: z.string().min(3).max(60) }),
+      system:
+        "Generate a short (4-6 word) conversation title based on the exchange. " +
+        "Be specific — capture the actual topic (e.g. 'Set Up GitHub Actions CI' not 'GitHub Help'). " +
+        "Title Case. No punctuation at end.",
+      prompt: `User: ${userText.slice(0, 300)}\nAssistant: ${assistantText.slice(0, 300)}`,
+    });
+    return result.object.title;
+  } catch {
+    return null;
+  }
+}
 
 type ReasoningLevel = "auto" | "low" | "medium" | "high";
 
@@ -99,6 +122,19 @@ export async function DELETE(req: Request) {
     message: "Conversation deleted",
     metadata: { conversationId: id },
   });
+  return NextResponse.json({ ok: true });
+}
+
+export async function PATCH(req: Request) {
+  const userId = await userIdOf();
+  const url = new URL(req.url);
+  const id = url.searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  const body = await req.json().catch(() => ({}));
+  const title = typeof body?.title === "string" ? body.title.trim().slice(0, 80) : null;
+  if (!title) return NextResponse.json({ error: "title required" }, { status: 400 });
+  await updateConversationTitle(id, userId, title);
+  await appendLog({ userId, level: "info", source: "chat", message: "Conversation renamed", metadata: { conversationId: id, title } });
   return NextResponse.json({ ok: true });
 }
 
@@ -251,6 +287,12 @@ const capabilitySnapshot = dynamicPrefixParts.join("\n");
         // Fire-and-forget: do not block stream completion on extraction.
         const isFirstMessage = messages.filter((m) => m.role === "user").length === 1;
         void autoExtractMemory({ userId, userText: lastUserText, assistantText, isFirstMessage });
+      }
+      // Auto-generate a smart conversation title after first exchange.
+      if (conversationId && messages.filter((m) => m.role === "user").length === 1 && lastUserText) {
+        void generateConversationTitle(userId, lastUserText, assistantText).then((title) => {
+          if (title) return updateConversationTitle(conversationId, userId, title);
+        });
       }
     },
   });

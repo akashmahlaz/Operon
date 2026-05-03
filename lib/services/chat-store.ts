@@ -119,6 +119,14 @@ export async function deleteConversation(conversationId: string, userId: string)
   ]);
 }
 
+export async function updateConversationTitle(conversationId: string, userId: string, title: string) {
+  await ensureIndexes();
+  await conversations().updateOne(
+    { _id: conversationId, userId },
+    { $set: { title: title.trim().slice(0, 80), updatedAt: nowIso() } },
+  );
+}
+
 export async function appendMessage(conversationId: string, userId: string, message: NewChatMessage) {
   await ensureIndexes();
   const existing = await conversations().findOne({ _id: conversationId, userId });

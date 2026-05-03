@@ -560,6 +560,7 @@ function ChatPage() {
             conversationId: activeConvId,
             modelSpec: selectedModel,
             reasoningLevel,
+            channel: activeChannel,
           },
         },
       );
