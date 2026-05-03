@@ -13,11 +13,10 @@ interface ReasoningPartProps {
 export function ReasoningPart({ text, streaming, className }: ReasoningPartProps) {
   const [open, setOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const startRef = useRef(Date.now());
+  const startRef = useRef<number>(0);
 
-  useEffect(() => {
-    if (streaming) setOpen(true);
-  }, [streaming, text]);
+  // Auto-open while streaming; user can manually toggle after
+  const effectiveOpen = open || !!streaming;
 
   useEffect(() => {
     if (!streaming) return;
@@ -40,12 +39,12 @@ export function ReasoningPart({ text, streaming, className }: ReasoningPartProps
       >
         <span className="text-primary/70">*</span>
         <span>{header}</span>
-        <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
+        <ChevronRight className={cn("size-3 transition-transform", effectiveOpen && "rotate-90")} />
       </button>
 
       <div className={cn(
         "overflow-hidden transition-[max-height,opacity] duration-200 ease-out",
-        open ? "max-h-96" : "max-h-0",
+        effectiveOpen ? "max-h-96" : "max-h-0",
       )}>
         <div className="mt-2 border-l border-border/70 pl-3">
           <p className="whitespace-pre-wrap text-[12px] italic leading-relaxed text-muted-foreground/75">

@@ -44,7 +44,6 @@ import { BorderBeam } from "@/components/ui/border-beam";
 import { BlurFade } from "@/components/ui/blur-fade";
 import { Ripple } from "@/components/ui/ripple";
 import { ShineBorder } from "@/components/ui/shine-border";
-import { OperonMark } from "@/components/brand";
 import AI_Input_Search, {
   type PromptModelOption,
   type ReasoningLevel,
@@ -415,7 +414,7 @@ function ChatPage() {
       const res = await fetch("/api/chat", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New Chat", channel: "web" }),
+        body: JSON.stringify({ title: "New Chat", channel: activeChannel }),
       });
       if (res.ok) {
         const data = await res.json();

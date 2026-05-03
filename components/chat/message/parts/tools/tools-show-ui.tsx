@@ -33,15 +33,28 @@ function toToolLike(value: unknown): ToolLike {
   return {};
 }
 
-function toolIcon(toolName: string, isPending: boolean, isError: boolean) {
-  if (isPending) return Loader2;
-  if (isError) return AlertCircle;
-  if (toolName.includes("github")) return GitBranch;
-  if (toolName.includes("search")) return Search;
-  if (toolName.includes("write") || toolName.includes("edit")) return PencilLine;
-  if (toolName.includes("file") || toolName.includes("code")) return FileCode2;
-  if (toolName.includes("message") || toolName.includes("chat") || toolName.includes("whatsapp")) return MessageSquareText;
-  return Check;
+function ToolIconDisplay({
+  toolName,
+  isPending,
+  isError,
+}: {
+  toolName: string;
+  isPending: boolean;
+  isError: boolean;
+}) {
+  const cls = isPending
+    ? "mt-0.5 size-3.5 shrink-0 animate-spin text-muted-foreground/70"
+    : isError
+      ? "mt-0.5 size-3.5 shrink-0 text-destructive"
+      : "mt-0.5 size-3.5 shrink-0 text-muted-foreground/70";
+  if (isPending) return <Loader2 className={cls} />;
+  if (isError) return <AlertCircle className={cls} />;
+  if (toolName.includes("github")) return <GitBranch className={cls} />;
+  if (toolName.includes("search")) return <Search className={cls} />;
+  if (toolName.includes("write") || toolName.includes("edit")) return <PencilLine className={cls} />;
+  if (toolName.includes("file") || toolName.includes("code")) return <FileCode2 className={cls} />;
+  if (toolName.includes("message") || toolName.includes("chat") || toolName.includes("whatsapp")) return <MessageSquareText className={cls} />;
+  return <Check className={cls} />;
 }
 
 export default function ToolPart({ tool }: { tool: unknown }) {
@@ -54,17 +67,10 @@ export default function ToolPart({ tool }: { tool: unknown }) {
   const isPending =
     state === "call" || state === "pending" || state === "input-streaming";
   const isError = state === "error" || state === "failed";
-  const Icon = toolIcon(toolName, isPending, isError);
 
   return (
     <div className="flex items-start gap-2.5 py-1.5 text-[13px] text-muted-foreground">
-      {isPending ? (
-        <Icon className="mt-0.5 size-3.5 shrink-0 animate-spin text-muted-foreground/70" />
-      ) : isError ? (
-        <Icon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-      ) : (
-        <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
-      )}
+      <ToolIconDisplay toolName={toolName} isPending={isPending} isError={isError} />
       <span className={cn("min-w-0 truncate", isError && "text-destructive")}>
         {isPending ? `${label}…` : label}
       </span>

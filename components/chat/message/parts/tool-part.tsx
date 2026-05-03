@@ -21,6 +21,10 @@ const TOOL_LABELS: Record<string, string> = {
   spawn_subagent: "Delegating to sub-agent",
   web_request: "Making web request",
   memory_search: "Searching memory",
+  memory_remember: "Saving to memory",
+  memory_forget: "Removing memory",
+  workspace_file_read: "Reading workspace file",
+  workspace_file_write: "Updating workspace file",
   discover_skills: "Discovering skills",
   github_read_file: "Reading GitHub file",
   github_write_file: "Editing GitHub file",
@@ -31,6 +35,8 @@ const TOOL_LABELS: Record<string, string> = {
   github_search_code: "Searching GitHub code",
   github_create_branch: "Creating branch",
   github_push_files: "Pushing files",
+  github_save_token: "Saving GitHub token",
+  github_list_repos: "Reading repositories",
 };
 
 export function getToolLabel(toolName: string) {
@@ -55,19 +61,28 @@ function toolStateLabel(state: ToolCallPart["state"]) {
   }
 }
 
-function toolIcon(toolName: string, state: ToolCallPart["state"]) {
+function ToolIconDisplay({
+  toolName,
+  state,
+}: {
+  toolName: string;
+  state: ToolCallPart["state"];
+}) {
   const pending = ["calling", "input-streaming", "input-available"].includes(state);
   const error = state === "error" || state === "output-error";
-
-  if (pending) return Loader2;
-  if (error) return AlertCircle;
-  if (toolName.includes("github")) return GitBranch;
-  if (toolName.includes("search")) return Search;
-  if (toolName.includes("write") || toolName.includes("edit") || toolName.includes("push")) return PencilLine;
-  if (toolName.includes("file") || toolName.includes("code")) return FileCode2;
-  if (toolName.includes("branch") || toolName.includes("pr")) return GitBranch;
-  if (toolName.includes("message") || toolName.includes("chat")) return MessageSquareText;
-  return Check;
+  const cls = pending
+    ? "size-3.5 animate-spin text-muted-foreground/70"
+    : error
+      ? "size-3.5 text-destructive"
+      : "size-3.5 text-muted-foreground/70";
+  if (pending) return <Loader2 className={cls} />;
+  if (error) return <AlertCircle className={cls} />;
+  if (toolName.includes("github") || toolName.includes("branch") || toolName.includes("pr")) return <GitBranch className={cls} />;
+  if (toolName.includes("search")) return <Search className={cls} />;
+  if (toolName.includes("write") || toolName.includes("edit") || toolName.includes("push")) return <PencilLine className={cls} />;
+  if (toolName.includes("file") || toolName.includes("code")) return <FileCode2 className={cls} />;
+  if (toolName.includes("message") || toolName.includes("chat")) return <MessageSquareText className={cls} />;
+  return <Check className={cls} />;
 }
 
 function summarizeValue(value: unknown): string | null {
@@ -85,21 +100,13 @@ function summarizeValue(value: unknown): string | null {
 }
 
 export function ToolPart({ tool }: { tool: ToolCallPart }) {
-  const pending = ["calling", "input-streaming", "input-available"].includes(tool.state);
   const error = tool.state === "error" || tool.state === "output-error";
-  const Icon = toolIcon(tool.toolName, tool.state);
   const detail = summarizeValue(tool.args) ?? summarizeValue(tool.result);
 
   return (
     <div className="group/tool relative flex items-start gap-2.5 py-1.5 text-[13px] text-muted-foreground">
       <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
-        {pending ? (
-          <Icon className="size-3.5 animate-spin text-muted-foreground/70" />
-        ) : error ? (
-          <Icon className="size-3.5 text-destructive" />
-        ) : (
-          <Icon className="size-3.5 text-muted-foreground/70" />
-        )}
+        <ToolIconDisplay toolName={tool.toolName} state={tool.state} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">

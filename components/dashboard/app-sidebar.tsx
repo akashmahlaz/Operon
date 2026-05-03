@@ -15,7 +15,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -33,7 +32,6 @@ import { dashboardNav } from "@/lib/nav";
 import type { ConversationSummary } from "@/lib/types";
 import { Plus, Search, LogOut, Settings, User, MoreHorizontal, Trash2, Clock } from "lucide-react";
 import { signOut } from "next-auth/react";
-import { cn } from "@/lib/utils";
 
 interface AppSidebarProps {
   conversations?: ConversationSummary[];

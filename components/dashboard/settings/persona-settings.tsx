@@ -25,8 +25,12 @@ type PersonaState = {
   voiceNotes: boolean;
   model?: string;
   temperature?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
   maxTokens?: number;
   timezone?: string;
+  systemPromptTail?: string;
 };
 
 type MemoryFact = {
@@ -64,8 +68,12 @@ const DEFAULT_STATE: PersonaState = {
   voiceNotes: false,
   model: undefined,
   temperature: undefined,
+  topP: undefined,
+  frequencyPenalty: undefined,
+  presencePenalty: undefined,
   maxTokens: undefined,
   timezone: undefined,
+  systemPromptTail: undefined,
 };
 
 function importanceBadge(importance?: number) {
@@ -269,6 +277,33 @@ export function PersonaSettings() {
               <Input value={persona.timezone ?? ""} onChange={(event) => setPersona({ ...persona, timezone: event.target.value })} placeholder="e.g. Asia/Kolkata" className="rounded-xl" />
               <p className="text-[11px] text-muted-foreground">Auto-detected from your browser. Lets Operon know your local time in every reply.</p>
             </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Top P ({persona.topP ?? "default"})</Label>
+              <Input type="range" min="0" max="1" step="0.05" value={persona.topP ?? 1} onChange={(event) => setPersona({ ...persona, topP: parseFloat(event.target.value) })} className="py-1" />
+              <p className="text-[11px] text-muted-foreground">Nucleus sampling. 1 = off, lower = narrower vocab</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Frequency Penalty ({persona.frequencyPenalty ?? 0})</Label>
+              <Input type="range" min="-2" max="2" step="0.05" value={persona.frequencyPenalty ?? 0} onChange={(event) => setPersona({ ...persona, frequencyPenalty: parseFloat(event.target.value) })} className="py-1" />
+              <p className="text-[11px] text-muted-foreground">+ve = less repetition of same words</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Presence Penalty ({persona.presencePenalty ?? 0})</Label>
+              <Input type="range" min="-2" max="2" step="0.05" value={persona.presencePenalty ?? 0} onChange={(event) => setPersona({ ...persona, presencePenalty: parseFloat(event.target.value) })} className="py-1" />
+              <p className="text-[11px] text-muted-foreground">+ve = encourages new topics</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Custom System Prompt Tail</Label>
+            <textarea
+              className="min-h-18 w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={persona.systemPromptTail ?? ""}
+              onChange={(e) => setPersona({ ...persona, systemPromptTail: e.target.value })}
+              placeholder={"e.g. Always end with a follow-up question.\nNever use bullet points."}
+            />
+            <p className="text-[11px] text-muted-foreground">Appended to the system prompt on every message. Use to add hard rules that always apply.</p>
           </div>
         </CardContent>
       </Card>
@@ -494,7 +529,7 @@ export function PersonaSettings() {
                 </div>
                 <p className="text-[11px] text-muted-foreground">Loaded first. Use for: preferred tools, workflow rules, hard constraints. Apply always.</p>
                 <textarea
-                  className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="min-h-20 w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={wsFiles.bootstrap}
                   onChange={(e) => setWsFiles((f) => ({ ...f, bootstrap: e.target.value }))}
                   placeholder={"e.g. Always check GitHub before answering questions about repos\nNever send more than 3 tool calls in one turn"}
@@ -509,7 +544,7 @@ export function PersonaSettings() {
                 </div>
                 <p className="text-[11px] text-muted-foreground">Loaded second. Use for: communication style, tone, phrases to use or avoid.</p>
                 <textarea
-                  className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="min-h-20 w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={wsFiles.soul}
                   onChange={(e) => setWsFiles((f) => ({ ...f, soul: e.target.value }))}
                   placeholder={"e.g. Be concise and direct. Use short paragraphs.\nAvoid emojis unless the user uses them first."}
@@ -524,7 +559,7 @@ export function PersonaSettings() {
                 </div>
                 <p className="text-[11px] text-muted-foreground">Operon writes facts here when you tell it about yourself. Edit to add or correct.</p>
                 <textarea
-                  className="min-h-[80px] w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="min-h-20 w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={wsFiles.user}
                   onChange={(e) => setWsFiles((f) => ({ ...f, user: e.target.value }))}
                   placeholder={"e.g. Akash works primarily in TypeScript and Rust.\nPreferred response length: medium (1-2 paragraphs)."}

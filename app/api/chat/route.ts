@@ -78,6 +78,7 @@ async function userIdOf(): Promise<string> {
 
 export async function GET(req: Request) {
   const userId = await userIdOf();
+  if (userId === "anon") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
 
@@ -93,6 +94,7 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   const userId = await userIdOf();
+  if (userId === "anon") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const conv = await createConversation({
     userId,
@@ -111,6 +113,7 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
   const userId = await userIdOf();
+  if (userId === "anon") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
@@ -127,6 +130,7 @@ export async function DELETE(req: Request) {
 
 export async function PATCH(req: Request) {
   const userId = await userIdOf();
+  if (userId === "anon") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
@@ -139,7 +143,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
   const messages: UIMessage[] = body.messages || [];
   const conversationId: string | null = body.conversationId || null;
   const modelSpec: string | null = body.modelSpec || null;
@@ -147,6 +151,7 @@ export async function POST(req: Request) {
     ? body.reasoningLevel
     : "auto";
   const userId = await userIdOf();
+  if (userId === "anon") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   if (conversationId) {
     const last = messages[messages.length - 1];
