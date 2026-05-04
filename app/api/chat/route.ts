@@ -1,4 +1,4 @@
-import { smoothStream, stepCountIs, streamText, type UIMessage, generateObject } from "ai";
+import { smoothStream, stepCountIs, streamText, generateObject } from "ai";
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
@@ -144,7 +144,12 @@ export async function PATCH(req: Request) {
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
-  const messages: UIMessage[] = body.messages || [];
+  const messages: { id: string; role: "user" | "assistant"; parts: Array<{ type: "text"; text: string }> }[] =
+    (body.messages || []).map((m: { _id?: string; role: string; parts?: Array<{ type: string; text?: string }> }, i: number) => ({
+      id: m._id ?? `msg-${i}`,
+      role: m.role as "user" | "assistant",
+      parts: (m.parts || []).map((p) => ({ type: "text" as const, text: p.text || "" })),
+    }));
   const conversationId: string | null = body.conversationId || null;
   const modelSpec: string | null = body.modelSpec || null;
   const reasoningLevel: ReasoningLevel = ["low", "medium", "high"].includes(body.reasoningLevel)
@@ -267,38 +272,89 @@ const capabilitySnapshot = dynamicPrefixParts.join("\n");
     },
   });
 
-  return result.toUIMessageStreamResponse({
-    originalMessages: messages,
-    sendReasoning: true,
-    sendSources: true,
-    onFinish: async ({ responseMessage }) => {
-      const assistantText = textFromParts(responseMessage.parts);
-      if (conversationId) {
-        await appendMessage(conversationId, userId, {
-          role: "assistant",
-          content: assistantText,
-          createdAt: new Date().toISOString(),
-          parts: responseMessage.parts as unknown[],
+  // ---------------------------------------------------------------------------
+  // Transform AI SDK chunks into our custom NDJSON event stream
+  // ---------------------------------------------------------------------------
+  function chunkToEvent(chunk: { type: string; [key: string]: unknown }): string | null {
+    switch (chunk.type) {
+      case "reasoning-start":
+        return JSON.stringify({ type: "reasoning-start", data: {} });
+      case "reasoning-delta":
+        return JSON.stringify({ type: "reasoning-delta", data: { text: String(chunk.delta ?? "") } });
+      case "reasoning-end":
+        return JSON.stringify({ type: "reasoning-end", data: {} });
+      case "tool-call":
+        return JSON.stringify({
+          type: "tool-call-start",
+          data: { toolCallId: String(chunk.toolCallId ?? ""), toolName: String(chunk.toolName ?? ""), args: chunk.args ?? chunk.input ?? {} },
         });
-        await appendLog({
-          userId,
-          level: "info",
-          source: "chat",
-          message: "Assistant message persisted",
-          metadata: { conversationId, parts: responseMessage.parts.length },
-        });
+      case "tool-input-start":
+        return JSON.stringify({ type: "tool-call-input-streaming", data: { toolCallId: String(chunk.toolCallId ?? "") } });
+      case "tool-input-delta":
+        return JSON.stringify({ type: "tool-call-input-streaming", data: { toolCallId: String(chunk.toolCallId ?? ""), args: { _delta: String(chunk.delta ?? "") } } });
+      case "tool-input-end": {
+        const id = String(chunk.toolCallId ?? "");
+        // Emit input-available then execute so UI shows both states
+        return (
+          JSON.stringify({ type: "tool-call-input-available", data: { toolCallId: id } }) +
+          `\ndata: ` +
+          JSON.stringify({ type: "tool-call-execute", data: { toolCallId: id } })
+        );
       }
-      if (persona.memoryEnabled && lastUserText) {
-        // Fire-and-forget: do not block stream completion on extraction.
-        const isFirstMessage = messages.filter((m) => m.role === "user").length === 1;
-        void autoExtractMemory({ userId, userText: lastUserText, assistantText, isFirstMessage });
-      }
-      // Auto-generate a smart conversation title after first exchange.
-      if (conversationId && messages.filter((m) => m.role === "user").length === 1 && lastUserText) {
-        void generateConversationTitle(userId, lastUserText, assistantText).then((title) => {
-          if (title) return updateConversationTitle(conversationId, userId, title);
-        });
+      case "tool-result":
+        return JSON.stringify({ type: "tool-call-output-available", data: { toolCallId: String(chunk.toolCallId ?? ""), result: chunk.output ?? null } });
+      case "tool-error":
+        return JSON.stringify({ type: "tool-call-output-error", data: { toolCallId: String(chunk.toolCallId ?? ""), errorText: chunk.error ? String(chunk.error) : "Tool error" } });
+      case "source":
+        return JSON.stringify({ type: "source-url", data: { url: String(chunk.url ?? ""), title: chunk.title ? String(chunk.title) : undefined } });
+      case "text-delta":
+        return JSON.stringify({ type: "text-delta", data: { text: String(chunk.delta ?? "") } });
+      case "data-file":
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  const encoder = new TextEncoder();
+  const customStream = new ReadableStream({
+    async start(controller) {
+      try {
+        const uiStream = result.toUIMessageStream({ originalMessages: messages, sendReasoning: true, sendSources: true, sendFinish: false });
+        for await (const chunk of uiStream) {
+          const ev = chunkToEvent(chunk as { type: string; [key: string]: unknown });
+          if (ev) controller.enqueue(encoder.encode(`data: ${ev}\n`));
+        }
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "message-end", data: {} })}\n`));
+        controller.close();
+      } catch (err) {
+        controller.error(err);
       }
     },
+  });
+
+  // Fire-and-forget persistence after stream completes
+  void (async () => {
+    try {
+      // Consume the full text from result.text
+      const fullText = await result.text;
+      if (conversationId) {
+        await appendMessage(conversationId, userId, { role: "assistant", content: fullText, createdAt: new Date().toISOString(), parts: [] });
+        await appendLog({ userId, level: "info", source: "chat", message: "Assistant message persisted", metadata: { conversationId } });
+      }
+      if (persona.memoryEnabled && lastUserText) {
+        const isFirstMessage = messages.filter((m) => m.role === "user").length === 1;
+        void autoExtractMemory({ userId, userText: lastUserText, assistantText: fullText, isFirstMessage });
+      }
+      if (conversationId && messages.filter((m) => m.role === "user").length === 1 && lastUserText) {
+        void generateConversationTitle(userId, lastUserText, fullText).then((title) => { if (title) return updateConversationTitle(conversationId, userId, title); });
+      }
+    } catch (err) {
+      console.error("[chat/POST] finish error:", err);
+    }
+  })();
+
+  return new Response(customStream, {
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" },
   });
 }

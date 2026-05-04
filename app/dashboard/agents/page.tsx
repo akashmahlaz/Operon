@@ -1,59 +1,79 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Plus, Play, Pause, Trash2, MoreHorizontal, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface Agent {
   id: string;
+  _id?: string;
   name: string;
   description: string;
   tools: string[];
   enabled: boolean;
 }
 
-const sampleAgents: Agent[] = [
-  {
-    id: "1",
-    name: "Marketing autopilot",
-    description: "Drafts, schedules and reports on social campaigns across all channels.",
-    tools: ["web_search", "generate_image", "whatsapp_send"],
-    enabled: true,
-  },
-  {
-    id: "2",
-    name: "Inbox triage",
-    description: "Reads new mail, drafts replies, and files away the rest.",
-    tools: ["memory_recall"],
-    enabled: false,
-  },
-  {
-    id: "3",
-    name: "Code reviewer",
-    description: "Reviews pull requests, highlights issues, and suggests improvements.",
-    tools: ["github_read_file", "github_write_file"],
-    enabled: true,
-  },
-];
-
 export default function AgentsPage() {
-  const [agents, setAgents] = useState<Agent[]>(sampleAgents);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const toggleAgent = (id: string) => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/agents", { cache: "no-store" });
+      const data = await res.json();
+      setAgents(Array.isArray(data.agents) ? data.agents : []);
+    } catch {
+      setAgents([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const toggleAgent = async (id: string) => {
+    const agent = agents.find((a) => a.id === id || a._id === id);
+    if (!agent) return;
+    const newEnabled = !agent.enabled;
     setAgents((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a))
+      prev.map((a) => (a.id === id || a._id === id ? { ...a, enabled: newEnabled } : a))
     );
-    toast.success("Agent updated");
+    try {
+      const res = await fetch(`/api/agents?id=${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: newEnabled }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast.success(newEnabled ? "Agent activated" : "Agent paused");
+    } catch {
+      // Revert on failure
+      setAgents((prev) =>
+        prev.map((a) => (a.id === id || a._id === id ? { ...a, enabled: !newEnabled } : a))
+      );
+      toast.error("Failed to update agent");
+    }
   };
 
-  const deleteAgent = (id: string) => {
-    setAgents((prev) => prev.filter((a) => a.id !== id));
-    toast.success("Agent deleted");
+  const deleteAgent = async (id: string) => {
+    setAgents((prev) => prev.filter((a) => a.id !== id && a._id !== id));
+    try {
+      const res = await fetch(`/api/agents?id=${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed");
+      toast.success("Agent deleted");
+    } catch {
+      toast.error("Failed to delete agent");
+      void load(); // Reload to restore state
+    }
   };
 
   return (
@@ -77,7 +97,27 @@ export default function AgentsPage() {
         </div>
 
         {/* Agents Grid */}
-        {agents.length === 0 ? (
+        {loading ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <Card key={i}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="size-10 rounded-xl" />
+                    <div className="space-y-1.5">
+                      <Skeleton className="h-4 w-36 rounded" />
+                      <Skeleton className="h-3 w-16 rounded" />
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-3.5 w-full rounded" />
+                  <Skeleton className="mt-2 h-3.5 w-4/5 rounded" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : agents.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border py-24 text-center">
             <Bot className="size-10 text-muted-foreground mb-3" />
             <p className="font-medium">No agents yet</p>

@@ -2,9 +2,6 @@
 
 import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import { useSession } from "next-auth/react";
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
-import type { UIMessage } from "ai";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -48,13 +45,12 @@ import AI_Input_Search, {
   type PromptModelOption,
   type ReasoningLevel,
 } from "@/components/kokonutui/ai-input-search";
-import { ChatMessageList } from "@/components/chat/message/message";
-import type { ChatDisplayMessage } from "@/components/chat/message/types";
+import { StreamingChatMessageList } from "@/components/chat/message/streaming-message";
+import { useStreamEvents } from "@/hooks/use-stream-events";
+import type { StreamingMessage } from "@/hooks/use-stream-events/types";
 import { isModelProvider, type ProviderMeta } from "@/components/dashboard/settings/provider-catalog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-
-type MessageRole = ChatDisplayMessage["role"];
 
 interface ConversationSummary {
   _id: string;
@@ -131,6 +127,7 @@ function ChatPage() {
 
   const convIdRef = useRef<string | null>(null);
 
+
   const {
     messages: chatMessages,
     sendMessage,
@@ -138,53 +135,13 @@ function ChatPage() {
     stop: stopChat,
     setMessages: setChatMessages,
     error: chatError,
-  } = useChat({
-    transport: new DefaultChatTransport({
-      api: "/api/chat",
-      body: () => ({ conversationId: convIdRef.current }),
-    }),
+  } = useStreamEvents({
+    api: "/api/chat",
+    conversationId: convIdRef.current ?? undefined,
   });
 
   const isLoading = status === "submitted" || status === "streaming";
-
-  // Map UIMessage[] → display messages for rendering.
-  const messages: ChatDisplayMessage[] = chatMessages.map((m: UIMessage) => {
-    const parts = (m as UIMessage).parts || [];
-    const textParts = parts.filter((p: { type: string }) => p.type === "text");
-    const reasoningParts = parts.filter((p: { type: string }) =>
-      ["reasoning", "thinking", "reasoning-text"].includes(p.type),
-    );
-    const toolParts = parts.filter((p: { type: string }) =>
-      p.type.startsWith("tool-") || p.type === "tool-invocation",
-    );
-    return {
-      role: m.role as MessageRole,
-      content: textParts.map((p) => (p as { text?: string }).text || "").join(""),
-      thinking:
-        reasoningParts
-          .map((p) => (p as { text?: string }).text || "")
-          .join("") || undefined,
-      toolCalls: toolParts.map((p) => {
-        const pp = p as {
-          type?: string;
-          toolName?: string;
-          state?: string;
-          input?: Record<string, unknown>;
-          output?: unknown;
-          errorText?: string;
-        };
-        const toolName = pp.toolName || (pp.type?.startsWith("tool-") ? pp.type.slice(5) : "tool");
-        const isDone = pp.output !== undefined || pp.state === "output-available";
-        return {
-          type: "tool-invocation" as const,
-          toolName,
-          state: pp.errorText ? ("output-error" as const) : isDone ? ("output-available" as const) : (pp.state as "input-streaming" | "input-available" | undefined) || ("calling" as const),
-          args: pp.input,
-          result: pp.output ?? pp.errorText,
-        };
-      }),
-    };
-  });
+  const messages = chatMessages;
 
   useEffect(() => {
     if (chatError) toast.error(chatError.message);
@@ -393,14 +350,16 @@ function ChatPage() {
       setConversationId(data._id);
       convIdRef.current = data._id;
       setActiveChannel(data.channel || "web");
-      const loaded: UIMessage[] = (data.messages || [])
+      const loaded: StreamingMessage[] = (data.messages || [])
         .filter((m: { role: string; content?: string }) => m.role !== "system" || m.content)
         .map((m: { _id?: string; role: string; content: string; parts?: unknown[] }, i: number) => ({
           id: m._id ?? String(i),
           role: m.role as "user" | "assistant",
-          parts: Array.isArray(m.parts) && m.parts.length > 0
-            ? (m.parts as UIMessage["parts"])
-            : [{ type: "text" as const, text: m.content || "" }],
+          orderedParts: Array.isArray(m.parts) && m.parts.length > 0
+            ? m.parts.map((p, j) => ({ id: `${m._id ?? String(i)}-${j}`, type: "text-delta", text: (p as { text?: string }).text || "" } as const))
+            : [{ id: `${m._id ?? String(i)}-0`, type: "text-delta" as const, text: m.content || "" }],
+          isComplete: true,
+          isStreaming: false,
         }));
       setChatMessages(loaded);
       requestAnimationFrame(() => scrollToBottom(true));
@@ -552,17 +511,15 @@ function ChatPage() {
       let activeConvId = conversationId;
       if (!activeConvId) activeConvId = await createConversation();
       convIdRef.current = activeConvId;
-      await sendMessage(
-        { text: content },
-        {
-          body: {
-            conversationId: activeConvId,
-            modelSpec: selectedModel,
-            reasoningLevel,
-            channel: activeChannel,
-          },
-        },
-      );
+
+      // Build options object matching useStreamEvents signature
+      const msgOpts = {
+        conversationId: activeConvId,
+        modelSpec: selectedModel,
+        reasoningLevel,
+        channel: activeChannel,
+      };
+      await sendMessage(content, msgOpts);
       loadConversations();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to connect";
@@ -1268,7 +1225,10 @@ function ChatPage() {
               </div>
             )}
 
-            <ChatMessageList messages={messages} isLoading={isLoading} />
+            <StreamingChatMessageList
+              messages={chatMessages as StreamingMessage[]}
+              isLoading={isLoading}
+            />
 
             <div ref={messagesEndRef} className="h-px" aria-hidden="true" />
           </div>

@@ -1,0 +1,640 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { cn } from "@/lib/utils";
+import type {
+  StreamingMessage,
+  StreamPart,
+  ReasoningPartEvent,
+  ToolCallEvent,
+  TextDeltaEvent,
+  SourceUrlEvent,
+} from "@/hooks/use-stream-events/types";
+import { getToolLabel, TOOL_STATE_LABELS } from "@/hooks/use-stream-events/types";
+import {
+  AlertCircle,
+  Check,
+  Circle,
+  Copy,
+  ExternalLink,
+  FileCode2,
+  GitBranch,
+  Loader2,
+  MessageSquareText,
+  PencilLine,
+  Search,
+} from "lucide-react";
+
+// ---------------------------------------------------------------------------
+// Elapsed timer — tracks how long the reasoning block has been open
+// ---------------------------------------------------------------------------
+function useElapsedTimer(isActive: boolean) {
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(0);
+
+  useEffect(() => {
+    if (!isActive) {
+      // Reset via deferred callback to avoid cascading renders
+      const timeout = setTimeout(() => setElapsed(0), 0);
+      return () => clearTimeout(timeout);
+    }
+    startRef.current = Date.now();
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)),
+      500
+    );
+    return () => clearInterval(id);
+  }, [isActive]);
+
+  return elapsed;
+}
+
+// ---------------------------------------------------------------------------
+// StreamingDots — the three bouncing dots shown while waiting
+// ---------------------------------------------------------------------------
+function StreamingDots({ label = "Generating…" }: { label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1" aria-label={label}>
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.3s]" />
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.15s]" />
+      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70" />
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ToolIcon — picks an icon based on tool name + state
+// ---------------------------------------------------------------------------
+function ToolIcon({
+  toolName,
+  state,
+}: {
+  toolName: string;
+  state: ToolCallEvent["state"];
+}) {
+  const pending = ["calling", "input-streaming", "input-available", "executing"].includes(
+    state
+  );
+  const error = state === "output-error";
+  const cls = error
+    ? "size-3.5 text-destructive shrink-0"
+    : pending
+      ? "size-3.5 animate-spin text-muted-foreground/70 shrink-0"
+      : "size-3.5 text-muted-foreground/70 shrink-0";
+
+  if (error) return <AlertCircle className={cls} />;
+  if (pending) return <Loader2 className={cls} />;
+  if (toolName.includes("github") || toolName.includes("branch") || toolName.includes("pr"))
+    return <GitBranch className={cls} />;
+  if (toolName.includes("search")) return <Search className={cls} />;
+  if (toolName.includes("write") || toolName.includes("edit") || toolName.includes("push"))
+    return <PencilLine className={cls} />;
+  if (toolName.includes("file") || toolName.includes("code")) return <FileCode2 className={cls} />;
+  if (toolName.includes("message") || toolName.includes("chat")) return <MessageSquareText className={cls} />;
+  return <Check className={cls} />;
+}
+
+// ---------------------------------------------------------------------------
+// ToolCallItem — renders a single tool entry with live state updates
+// ---------------------------------------------------------------------------
+function ToolCallItem({ event }: { event: ToolCallEvent }) {
+  const detail = (() => {
+    if (event.result && typeof event.result === "object") {
+      const r = event.result as Record<string, unknown>;
+      return (
+        r.path ??
+        r.filePath ??
+        r.filename ??
+        r.query ??
+        r.search ??
+        (r.owner && r.repo ? `${r.owner}/${r.repo}` : null)
+      );
+    }
+    if (event.args && typeof event.args === "object") {
+      const a = event.args as Record<string, unknown>;
+      return (
+        a.path ??
+        a.filePath ??
+        a.query ??
+        a.search ??
+        (a.owner && a.repo ? `${a.owner}/${a.repo}` : null)
+      );
+    }
+    return null;
+  })();
+
+  return (
+    <div className="group/tool relative flex items-start gap-2.5 py-1 text-[13px] text-muted-foreground">
+      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+        <ToolIcon toolName={event.toolName} state={event.state} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              "truncate",
+              event.state === "output-error" && "text-destructive"
+            )}
+          >
+            {getToolLabel(event.toolName)}
+          </span>
+          <span className="shrink-0 text-[12px] text-muted-foreground/55">
+            {TOOL_STATE_LABELS[event.state] ?? event.state}
+          </span>
+        </div>
+        {detail && (
+          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/50">
+            {typeof detail === "string" ? detail : JSON.stringify(detail)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ToolCallList — renders all tool calls in a left-bordered list
+// ---------------------------------------------------------------------------
+function ToolCallList({ events }: { events: ToolCallEvent[] }) {
+  if (!events.length) return null;
+  return (
+    <div className="relative ml-0.5 border-l border-border/70 pl-3">
+      {events.map((ev, i) => (
+        <div key={`${ev.toolCallId}-${i}`} className="relative">
+          <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
+            <Circle className="size-1.5 fill-background text-border" />
+          </span>
+          <ToolCallItem event={ev} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ReasoningBlock — collapsible reasoning with streaming text
+// ---------------------------------------------------------------------------
+function ReasoningBlock({
+  reasoningEvents,
+  isStreaming,
+  activeToolNames,
+}: {
+  reasoningEvents: ReasoningPartEvent[];
+  isStreaming: boolean;
+  activeToolNames?: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const text = reasoningEvents
+    .map((e) => e.text)
+    .join("")
+    .trim();
+  const elapsed = useElapsedTimer(isStreaming);
+  const effectiveOpen = open || !!isStreaming;
+
+  if (!text && !isStreaming) return null;
+
+  const header = isStreaming
+    ? `Thinking${elapsed > 0 ? ` ${elapsed}s` : "…"}`
+    : `Thought${elapsed > 0 ? ` for ${elapsed}s` : ""}`;
+
+  return (
+    <div className="text-muted-foreground">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="group/reasoning inline-flex items-center gap-1.5 text-[12px] italic leading-none text-muted-foreground/80 hover:text-muted-foreground"
+      >
+        <span className="text-primary/70">*</span>
+        <span>{header}</span>
+        {activeToolNames && activeToolNames.length > 0 && (
+          <span className="text-[11px] text-primary/40">
+            · {activeToolNames.join(", ")}
+          </span>
+        )}
+        <svg
+          className={cn(
+            "size-3 transition-transform",
+            effectiveOpen && "rotate-90"
+          )}
+          viewBox="0 0 16 16"
+          fill="none"
+        >
+          <path
+            d="M6 4l4 4-4 4"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      <div
+        className={cn(
+          "overflow-hidden transition-[max-height,opacity] duration-200 ease-out",
+          effectiveOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+        )}
+      >
+        <div className="mt-2 border-l border-border/70 pl-3">
+          <p className="whitespace-pre-wrap text-[12px] italic leading-relaxed text-muted-foreground/75">
+            {text}
+            {isStreaming && (
+              <span className="ml-0.5 inline-block w-px h-3 bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CodeBlockFenced — fenced code block with header bar + copy button
+// ---------------------------------------------------------------------------
+function CodeBlockFenced({ code, lang }: { code: string; lang: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="group/code relative my-2 overflow-hidden rounded-xl bg-[hsl(220,13%,14%)] text-[hsl(220,14%,90%)] ring-1 ring-white/10">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-2">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-white/40">
+          {lang || "code"}
+        </span>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(code);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+          className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white/70"
+        >
+          {copied ? (
+            <><Check className="size-3" /> Copied</>
+          ) : (
+            <><Copy className="size-3" /> Copy</>
+          )}
+        </button>
+      </div>
+      <pre className="overflow-x-auto p-4 text-[13px] leading-relaxed">
+        <code className="font-mono">{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SourceUrlPills — citation pills for web-search results
+// ---------------------------------------------------------------------------
+function SourceUrlPills({ urls }: { urls: SourceUrlEvent[] }) {
+  if (!urls.length) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5">
+      {urls.map((u, i) => {
+        let host = u.url;
+        try { host = new URL(u.url).hostname.replace("www.", ""); } catch { /* noop */ }
+        return (
+          <a
+            key={i}
+            href={u.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/60 px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+          >
+            <ExternalLink className="size-2.5 shrink-0" />
+            <span className="max-w-[180px] truncate">{u.title || host}</span>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// buildSegments — groups orderedParts into ordered interleaved render segments
+// ---------------------------------------------------------------------------
+type RenderSegment =
+  | { kind: "reasoning"; events: ReasoningPartEvent[] }
+  | { kind: "tools"; tools: ToolCallEvent[] }
+  | { kind: "text"; events: TextDeltaEvent[] }
+  | { kind: "sources"; urls: SourceUrlEvent[] };
+
+function buildSegments(parts: StreamPart[]): RenderSegment[] {
+  const segs: RenderSegment[] = [];
+  const seenToolIds = new Set<string>();
+
+  for (const part of parts) {
+    const last = segs[segs.length - 1];
+
+    if (
+      part.type === "reasoning-start" ||
+      part.type === "reasoning-delta" ||
+      part.type === "reasoning-end"
+    ) {
+      if (last?.kind === "reasoning") {
+        last.events.push(part as ReasoningPartEvent);
+      } else {
+        segs.push({ kind: "reasoning", events: [part as ReasoningPartEvent] });
+      }
+    } else if (part.type.startsWith("tool-call")) {
+      const t = part as ToolCallEvent;
+      if (seenToolIds.has(t.toolCallId)) continue; // in-place mutation — already tracked
+      seenToolIds.add(t.toolCallId);
+      if (last?.kind === "tools") {
+        last.tools.push(t);
+      } else {
+        segs.push({ kind: "tools", tools: [t] });
+      }
+    } else if (part.type === "text-delta" || part.type === "text-end") {
+      if (last?.kind === "text") {
+        last.events.push(part as TextDeltaEvent);
+      } else {
+        segs.push({ kind: "text", events: [part as TextDeltaEvent] });
+      }
+    } else if (part.type === "source-url") {
+      if (last?.kind === "sources") {
+        last.urls.push(part as SourceUrlEvent);
+      } else {
+        segs.push({ kind: "sources", urls: [part as SourceUrlEvent] });
+      }
+    }
+  }
+
+  return segs;
+}
+
+// ---------------------------------------------------------------------------
+// StreamingText — markdown with react-markdown, code highlighting, live cursor
+// ---------------------------------------------------------------------------
+function StreamingText({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  if (!text) return null;
+
+  function CodeBlock({
+    children,
+    className,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+  }) {
+    const isInline = !className;
+    if (isInline) {
+      return (
+        <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground">
+          {children}
+        </code>
+      );
+    }
+    const lang = className?.replace("language-", "") ?? "";
+    return <CodeBlockFenced code={String(children ?? "").replace(/\n$/, "")} lang={lang} />;
+  }
+
+  return (
+    <div
+      className={cn(
+        "prose prose-sm max-w-none wrap-break-word leading-relaxed text-foreground",
+        "prose-headings:font-heading prose-headings:text-foreground prose-p:my-1.5",
+        "prose-code:before:content-none prose-code:after:content-none",
+        "prose-pre:m-0 prose-pre:bg-transparent prose-pre:p-0",
+        "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+      )}
+    >
+      <Markdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+        {text}
+      </Markdown>
+      {isStreaming && (
+        <span className="ml-0.5 inline-block h-4 w-0.5 animate-(--animate-blink) align-text-bottom bg-foreground" />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AssistantAvatar + AssistantLabel — shared UI elements
+// ---------------------------------------------------------------------------
+function AssistantAvatar() {
+  return (
+    <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center">
+      <svg viewBox="0 0 24 24" className="size-4.5 text-foreground fill-current">
+        <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8 8 3.589 8 8-3.589 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
+      </svg>
+    </div>
+  );
+}
+
+function AssistantLabel() {
+  return (
+    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground/65">
+      <span>Operon</span>
+      <span className="h-px w-3 bg-border/70" />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// UserMessage — shows user's text in a bubble
+// ---------------------------------------------------------------------------
+function UserMessage({ text }: { text: string }) {
+  return (
+    <div className="group flex flex-col items-end gap-1.5 py-2">
+      <div className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+        <p className="whitespace-pre-wrap wrap-break-word text-[14.5px] leading-relaxed">
+          {text}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SystemMessage — centered system message pill
+// ---------------------------------------------------------------------------
+function SystemMessage({ text }: { text: string }) {
+  return (
+    <div className="flex justify-center py-1">
+      <span className="rounded-full bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground">
+        {text}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CopyButton — copy text content
+// ---------------------------------------------------------------------------
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      {copied ? <Check className="size-3.5" /> : null}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StreamingAssistantMessage — ordered interleaved rendering (not bucketed)
+// ---------------------------------------------------------------------------
+function StreamingAssistantMessage({
+  message,
+  isLoading,
+}: {
+  message: StreamingMessage;
+  isLoading: boolean;
+}) {
+  const isStreamingThis = isLoading && !message.isComplete;
+  const segments = buildSegments(message.orderedParts);
+
+  // Active tool names for the reasoning header
+  const activeToolNames = segments
+    .flatMap((s) => (s.kind === "tools" ? s.tools : []))
+    .filter((t) =>
+      ["calling", "input-streaming", "input-available", "executing"].includes(t.state)
+    )
+    .map((t) => getToolLabel(t.toolName));
+
+  // Full text across all text segments — for copy button
+  const allText = segments
+    .filter((s): s is { kind: "text"; events: TextDeltaEvent[] } => s.kind === "text")
+    .flatMap((s) => s.events)
+    .map((e) => e.text)
+    .join("");
+
+  return (
+    <div className="group flex max-w-3xl items-start gap-2.5 py-3">
+      <AssistantAvatar />
+      <div className="min-w-0 flex-1">
+        <AssistantLabel />
+
+        <div className="space-y-2">
+          {segments.map((seg, i) => {
+            const isLastSeg = isStreamingThis && i === segments.length - 1;
+
+            if (seg.kind === "reasoning") {
+              return (
+                <ReasoningBlock
+                  key={i}
+                  reasoningEvents={seg.events}
+                  isStreaming={isLastSeg}
+                  activeToolNames={activeToolNames.length > 0 ? activeToolNames : undefined}
+                />
+              );
+            }
+            if (seg.kind === "tools") {
+              return <ToolCallList key={i} events={seg.tools} />;
+            }
+            if (seg.kind === "text") {
+              const text = seg.events.map((e) => e.text).join("");
+              return text ? (
+                <StreamingText key={i} text={text} isStreaming={isLastSeg} />
+              ) : null;
+            }
+            if (seg.kind === "sources") {
+              return <SourceUrlPills key={i} urls={seg.urls} />;
+            }
+            return null;
+          })}
+
+          {/* Waiting spinner when no content has arrived yet */}
+          {isStreamingThis && segments.length === 0 && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <StreamingDots />
+              <span className="italic">Generating…</span>
+            </div>
+          )}
+
+          {/* Copy button — only when message is complete */}
+          {allText && !isStreamingThis && (
+            <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <CopyButton text={allText} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ChatMessageRow — routes based on role
+// ---------------------------------------------------------------------------
+function ChatMessageRow({
+  message,
+  isLoading,
+}: {
+  message: StreamingMessage;
+  isLoading: boolean;
+}) {
+  if (message.role === "user") {
+    const text = message.orderedParts
+      .filter((p) => p.type === "text-delta")
+      .map((p) => (p as TextDeltaEvent).text)
+      .join("");
+    return <UserMessage text={text} />;
+  }
+  return (
+    <StreamingAssistantMessage message={message} isLoading={isLoading} />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ChatMessageList — the main exported list component
+// ---------------------------------------------------------------------------
+export function StreamingChatMessageList({
+  messages,
+  isLoading,
+}: {
+  messages: StreamingMessage[];
+  isLoading: boolean;
+}) {
+  const lastMsg = messages[messages.length - 1];
+  const isStreaming = isLoading && lastMsg?.role === "user";
+
+  return (
+    <div className="flex flex-col gap-2 pb-4">
+      {messages.map((message) => (
+        <ChatMessageRow
+          key={message.id}
+          message={message}
+          isLoading={isLoading}
+        />
+      ))}
+
+      {isStreaming && (
+        <PendingStreamingMessage />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PendingStreamingMessage — shown before any response arrives
+// ---------------------------------------------------------------------------
+function PendingStreamingMessage() {
+  return (
+    <div className="flex max-w-3xl items-start gap-2.5 py-3">
+      <AssistantAvatar />
+      <div className="min-w-0 flex-1">
+        <AssistantLabel />
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <StreamingDots />
+          <span className="italic">Thinking…</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Re-export types
+export type {
+  StreamingMessage,
+  StreamPart,
+  ReasoningPartEvent,
+  ToolCallEvent,
+  TextDeltaEvent,
+  SourceUrlEvent,
+} from "@/hooks/use-stream-events/types";
