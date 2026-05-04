@@ -4,10 +4,10 @@ mod health;
 
 use axum::{
     Router,
-    http::HeaderValue,
+    http::{HeaderValue, Method, header},
     routing::{get, post},
 };
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 use crate::state::AppState;
 
@@ -32,7 +32,7 @@ fn cors(state: AppState) -> CorsLayer {
 
     CorsLayer::new()
         .allow_origin(origin)
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT])
         .allow_credentials(true)
 }

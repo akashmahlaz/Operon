@@ -337,6 +337,79 @@ const capabilitySnapshot = dynamicPrefixParts.join("\n");
   // ---------------------------------------------------------------------------
   // Transform AI SDK chunks into our custom NDJSON event stream
   // ---------------------------------------------------------------------------
+  const persistedParts: unknown[] = [];
+  const persistedToolIndex = new Map<string, number>();
+  let persistedReasoningText = "";
+  let persistedAssistantText = "";
+
+  function pushPersistedPart(part: Record<string, unknown>) {
+    persistedParts.push(part);
+  }
+
+  function updatePersistedTool(toolCallId: string, partial: Record<string, unknown>) {
+    const index = persistedToolIndex.get(toolCallId);
+    if (index === undefined) return;
+    persistedParts[index] = { ...(persistedParts[index] as Record<string, unknown>), ...partial };
+  }
+
+  function rememberChunk(chunk: { type: string; [key: string]: unknown }) {
+    switch (chunk.type) {
+      case "reasoning-start":
+        persistedReasoningText = "";
+        pushPersistedPart({ type: "reasoning-start", text: "" });
+        break;
+      case "reasoning-delta": {
+        persistedReasoningText += String(chunk.delta ?? "");
+        const last = persistedParts[persistedParts.length - 1] as Record<string, unknown> | undefined;
+        if (last?.type === "reasoning-delta") {
+          persistedParts[persistedParts.length - 1] = { ...last, text: persistedReasoningText };
+        } else {
+          pushPersistedPart({ type: "reasoning-delta", text: persistedReasoningText });
+        }
+        break;
+      }
+      case "reasoning-end":
+        pushPersistedPart({ type: "reasoning-end", text: persistedReasoningText });
+        break;
+      case "tool-call": {
+        const toolCallId = String(chunk.toolCallId ?? crypto.randomUUID());
+        persistedToolIndex.set(toolCallId, persistedParts.length);
+        pushPersistedPart({
+          type: "tool-call-start",
+          toolCallId,
+          toolName: String(chunk.toolName ?? "tool"),
+          state: "calling",
+          args: chunk.args ?? chunk.input ?? {},
+        });
+        break;
+      }
+      case "tool-input-start":
+        updatePersistedTool(String(chunk.toolCallId ?? ""), { type: "tool-call-input-streaming", state: "input-streaming" });
+        break;
+      case "tool-input-delta":
+        updatePersistedTool(String(chunk.toolCallId ?? ""), { type: "tool-call-input-streaming", state: "input-streaming", args: { _delta: String(chunk.delta ?? "") } });
+        break;
+      case "tool-input-end":
+        updatePersistedTool(String(chunk.toolCallId ?? ""), { type: "tool-call-execute", state: "executing" });
+        break;
+      case "tool-result":
+        updatePersistedTool(String(chunk.toolCallId ?? ""), { type: "tool-call-output-available", state: "output-available", result: chunk.output ?? null });
+        break;
+      case "tool-error":
+        updatePersistedTool(String(chunk.toolCallId ?? ""), { type: "tool-call-output-error", state: "output-error", errorText: chunk.error ? String(chunk.error) : "Tool error" });
+        break;
+      case "source":
+        pushPersistedPart({ type: "source-url", url: String(chunk.url ?? ""), title: chunk.title ? String(chunk.title) : undefined });
+        break;
+      case "text-delta": {
+        const text = String(chunk.delta ?? "");
+        persistedAssistantText += text;
+        pushPersistedPart({ type: "text-delta", text });
+        break;
+      }
+    }
+  }
+
   function chunkToEvent(chunk: { type: string; [key: string]: unknown }): string | null {
     switch (chunk.type) {
       case "reasoning-start":
@@ -384,8 +457,32 @@ const capabilitySnapshot = dynamicPrefixParts.join("\n");
       try {
         const uiStream = result.toUIMessageStream({ originalMessages: messages, sendReasoning: true, sendSources: true, sendFinish: false });
         for await (const chunk of uiStream) {
-          const ev = chunkToEvent(chunk as { type: string; [key: string]: unknown });
+          const typedChunk = chunk as { type: string; [key: string]: unknown };
+          rememberChunk(typedChunk);
+          const ev = chunkToEvent(typedChunk);
           if (ev) controller.enqueue(encoder.encode(`data: ${ev}\n`));
+        }
+        if (conversationId) {
+          await appendMessage(conversationId, userId, {
+            role: "assistant",
+            content: persistedAssistantText,
+            createdAt: new Date().toISOString(),
+            parts: persistedParts,
+          });
+          await appendLog({
+            userId,
+            level: "info",
+            source: "chat",
+            message: "Assistant message persisted",
+            metadata: { conversationId, parts: persistedParts.length, textLength: persistedAssistantText.length },
+          });
+        }
+        if (persona.memoryEnabled && lastUserText) {
+          const isFirstMessage = messages.filter((m) => m.role === "user").length === 1;
+          void autoExtractMemory({ userId, userText: lastUserText, assistantText: persistedAssistantText, isFirstMessage });
+        }
+        if (conversationId && messages.filter((m) => m.role === "user").length === 1 && lastUserText) {
+          void generateConversationTitle(userId, lastUserText, persistedAssistantText).then((title) => { if (title) return updateConversationTitle(conversationId, userId, title); });
         }
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "message-end", data: {} })}\n`));
         controller.close();
@@ -394,27 +491,6 @@ const capabilitySnapshot = dynamicPrefixParts.join("\n");
       }
     },
   });
-
-  // Fire-and-forget persistence after stream completes
-  void (async () => {
-    try {
-      // Consume the full text from result.text
-      const fullText = await result.text;
-      if (conversationId) {
-        await appendMessage(conversationId, userId, { role: "assistant", content: fullText, createdAt: new Date().toISOString(), parts: [] });
-        await appendLog({ userId, level: "info", source: "chat", message: "Assistant message persisted", metadata: { conversationId } });
-      }
-      if (persona.memoryEnabled && lastUserText) {
-        const isFirstMessage = messages.filter((m) => m.role === "user").length === 1;
-        void autoExtractMemory({ userId, userText: lastUserText, assistantText: fullText, isFirstMessage });
-      }
-      if (conversationId && messages.filter((m) => m.role === "user").length === 1 && lastUserText) {
-        void generateConversationTitle(userId, lastUserText, fullText).then((title) => { if (title) return updateConversationTitle(conversationId, userId, title); });
-      }
-    } catch (err) {
-      console.error("[chat/POST] finish error:", err);
-    }
-  })();
 
   return new Response(customStream, {
     headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" },

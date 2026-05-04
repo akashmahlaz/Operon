@@ -47,7 +47,8 @@ import AI_Input_Search, {
 } from "@/components/kokonutui/ai-input-search";
 import { StreamingChatMessageList } from "@/components/chat/message/streaming-message";
 import { useStreamEvents } from "@/hooks/use-stream-events";
-import type { StreamingMessage } from "@/hooks/use-stream-events/types";
+import type { ContentPartType, StreamPart, StreamingMessage, ToolCallEvent } from "@/hooks/use-stream-events/types";
+import { isToolState } from "@/hooks/use-stream-events/types";
 import { isModelProvider, type ProviderMeta } from "@/components/dashboard/settings/provider-catalog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -94,6 +95,64 @@ interface AttachedFile {
   uploading?: boolean;
   url?: string;
   error?: string;
+}
+
+const streamPartTypes = new Set<ContentPartType>([
+  "reasoning-start",
+  "reasoning-delta",
+  "reasoning-end",
+  "tool-call-start",
+  "tool-call-input-streaming",
+  "tool-call-input-available",
+  "tool-call-execute",
+  "tool-call-output-available",
+  "tool-call-output-error",
+  "tool-call-end",
+  "text-delta",
+  "text-end",
+  "source-url",
+]);
+
+function hydrateMessageParts(messageId: string, parts: unknown[] | undefined, fallbackText: string): StreamPart[] {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return [{ id: `${messageId}-0`, type: "text-delta", text: fallbackText }];
+  }
+
+  const hydrated = parts.flatMap((part, index): StreamPart[] => {
+    if (!part || typeof part !== "object") return [];
+    const raw = part as Record<string, unknown>;
+    const type = typeof raw.type === "string" ? raw.type : "";
+    const id = typeof raw.id === "string" ? raw.id : `${messageId}-${index}`;
+
+    if (streamPartTypes.has(type as ContentPartType)) {
+      if (type.startsWith("reasoning")) {
+        return [{ id, type: type as "reasoning-start" | "reasoning-delta" | "reasoning-end", text: typeof raw.text === "string" ? raw.text : "" }];
+      }
+      if (type.startsWith("tool-call")) {
+        const state = typeof raw.state === "string" && isToolState(raw.state) ? raw.state : "output-available";
+        return [{
+          id,
+          type: type as ToolCallEvent["type"],
+          toolCallId: typeof raw.toolCallId === "string" ? raw.toolCallId : id,
+          toolName: typeof raw.toolName === "string" ? raw.toolName : "tool",
+          state,
+          args: raw.args && typeof raw.args === "object" ? raw.args as Record<string, unknown> : undefined,
+          result: raw.result,
+          errorText: typeof raw.errorText === "string" ? raw.errorText : undefined,
+        }];
+      }
+      if (type === "source-url") {
+        return [{ id, type: "source-url", url: typeof raw.url === "string" ? raw.url : "", title: typeof raw.title === "string" ? raw.title : undefined }];
+      }
+      return [{ id, type: type as "text-delta" | "text-end", text: typeof raw.text === "string" ? raw.text : "" }];
+    }
+
+    if (type === "text") return [{ id, type: "text-delta", text: typeof raw.text === "string" ? raw.text : "" }];
+    if (type === "reasoning") return [{ id, type: "reasoning-delta", text: typeof raw.text === "string" ? raw.text : typeof raw.reasoning === "string" ? raw.reasoning : "" }];
+    return [];
+  });
+
+  return hydrated.length > 0 ? hydrated : [{ id: `${messageId}-0`, type: "text-delta", text: fallbackText }];
 }
 
 
@@ -389,9 +448,7 @@ function ChatPage() {
         .map((m: { _id?: string; role: string; content: string; parts?: unknown[] }, i: number) => ({
           id: m._id ?? String(i),
           role: m.role as "user" | "assistant",
-          orderedParts: Array.isArray(m.parts) && m.parts.length > 0
-            ? m.parts.map((p, j) => ({ id: `${m._id ?? String(i)}-${j}`, type: "text-delta", text: (p as { text?: string }).text || "" } as const))
-            : [{ id: `${m._id ?? String(i)}-0`, type: "text-delta" as const, text: m.content || "" }],
+          orderedParts: hydrateMessageParts(m._id ?? String(i), m.parts, m.content || ""),
           isComplete: true,
           isStreaming: false,
         }));
