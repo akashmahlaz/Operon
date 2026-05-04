@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { isModelProvider, providerCatalog } from "@/components/dashboard/settings/provider-catalog";
-import { listAuthProfiles, removeAuthProfile, upsertAuthProfile } from "@/lib/services/auth-profiles";
-import { defaultModelFor, discoverModels } from "@/lib/services/model-discovery";
+import { listAuthProfiles, removeAuthProfile, updateAuthProfileModels, upsertAuthProfile } from "@/lib/services/auth-profiles";
+import { defaultModelFor, discoverModelsWithSource } from "@/lib/services/model-discovery";
 import { getMostRecentModelProfile } from "@/lib/services/auth-profiles";
 import { appendLog } from "@/lib/services/logs";
 import { getUserSettings, setDefaultModel } from "@/lib/services/user-settings";
@@ -21,23 +21,51 @@ export async function GET() {
     getMostRecentModelProfile(userId),
   ]);
   const profileByProvider = new Map(profiles.map((profile) => [profile.provider, profile]));
-  const providers = providerCatalog.map((provider) => {
-    const profile = profileByProvider.get(provider.id);
-    return {
-      ...provider,
-      configured: Boolean(profile) || provider.configured,
-      tokenRef: profile?.tokenRef || provider.tokenRef,
-      baseUrl: profile?.baseUrl,
-      models: profile?.models?.length ? profile.models : provider.models,
-      updatedAt: profile?.updatedAt || provider.updatedAt,
-      defaultModel: profile?.defaultModel,
-      metadata: profile?.metadata,
-    };
-  });
+
+  // For each configured provider that has no stored profile models, eagerly discover
+  // models so the response always contains real API-fetched model IDs rather than
+  // static catalog placeholders. Results are in-memory cached (5 min TTL).
+  const providers = await Promise.all(
+    providerCatalog.map(async (provider) => {
+      const profile = profileByProvider.get(provider.id);
+      const isConfigured = Boolean(profile) || provider.configured;
+
+      let models: string[] | undefined = profile?.models?.length ? profile.models : undefined;
+      let modelsSource: "api" | "profile" | "static" | "unavailable" = models ? "profile" : "static";
+
+      // No stored models but provider is configured — try live discovery (uses cache).
+      // This is the MiniMax env-key path and any future env-backed provider path.
+      if (!models && isConfigured) {
+        try {
+          const discovered = await discoverModelsWithSource({ providerId: provider.id, userId });
+          if (discovered.source === "api") {
+            models = discovered.models.map((m) => m.id);
+          }
+          modelsSource = discovered.source;
+        } catch {
+          modelsSource = "unavailable";
+        }
+      }
+
+      return {
+        ...provider,
+        configured: isConfigured,
+        tokenRef: profile?.tokenRef || provider.tokenRef,
+        baseUrl: profile?.baseUrl,
+        models: models ?? provider.models ?? [],
+        modelsFromProfile: modelsSource === "api" || modelsSource === "profile",
+        modelsSource,
+        updatedAt: profile?.updatedAt || provider.updatedAt,
+        defaultModel: profile?.defaultModel,
+        metadata: profile?.metadata,
+      };
+    }),
+  );
+
   return NextResponse.json({
     providers,
     profiles,
-    defaultModel: settings?.defaultModel || (recentModelProfile ? `${recentModelProfile.provider}/${recentModelProfile.defaultModel || recentModelProfile.models?.[0]}` : "minimax/MiniMax-M2.7"),
+    defaultModel: settings?.defaultModel || (recentModelProfile ? `${recentModelProfile.provider}/${recentModelProfile.defaultModel || recentModelProfile.models?.[0]}` : "minimax/MiniMax-M2.1"),
     recentProviderId: recentModelProfile?.provider || "minimax",
   });
 }
@@ -59,8 +87,13 @@ export async function POST(req: Request) {
   if (action === "refresh-models") {
     const providerId = String(body?.provider || "");
     if (!providerId) return NextResponse.json({ error: "provider required" }, { status: 400 });
-    const models = await discoverModels({ providerId, userId, force: true, baseUrl: typeof body?.baseUrl === "string" ? body.baseUrl : undefined });
-    return NextResponse.json({ models });
+    const discovered = await discoverModelsWithSource({ providerId, userId, force: true, baseUrl: typeof body?.baseUrl === "string" ? body.baseUrl : undefined });
+    const modelIds = discovered.models.map((model) => model.id);
+    const defaultModel = modelIds.length > 0 ? defaultModelFor(providerId, modelIds) : undefined;
+    const profile = discovered.source === "api"
+      ? await updateAuthProfileModels(userId, providerId, modelIds, defaultModel)
+      : null;
+    return NextResponse.json({ models: discovered.models, source: discovered.source, defaultModel, profile });
   }
 
   const providerId = String(body?.provider || "");
@@ -71,13 +104,16 @@ export async function POST(req: Request) {
   if (!provider) return NextResponse.json({ error: "unknown provider" }, { status: 400 });
   if (!apiKey) return NextResponse.json({ error: "apiKey required" }, { status: 400 });
 
-  let models = provider.models?.map((id) => ({ id, name: id, provider: providerId })) || [];
+  let models: Array<{ id: string; name: string; provider: string }> = [];
+  let source: "api" | "static" | "unavailable" = "unavailable";
   if (isModelProvider(provider)) {
-    models = await discoverModels({ providerId, apiKey, baseUrl, force: true });
+    const discovered = await discoverModelsWithSource({ providerId, apiKey, baseUrl, force: true });
+    models = discovered.models;
+    source = discovered.source;
   }
 
   const modelIds = models.map((model) => model.id);
-  const defaultModel = defaultModelFor(providerId, modelIds);
+  const defaultModel = modelIds.length > 0 ? defaultModelFor(providerId, modelIds) : undefined;
   const profile = await upsertAuthProfile({
     userId,
     provider: providerId,
@@ -89,7 +125,7 @@ export async function POST(req: Request) {
   });
 
   await appendLog({ userId, level: "info", source: "providers", message: "Provider connected", metadata: { provider: providerId, models: modelIds.length } });
-  return NextResponse.json({ ok: true, profile, models, defaultModel });
+  return NextResponse.json({ ok: true, profile, models, source, defaultModel });
 }
 
 export async function DELETE(req: Request) {

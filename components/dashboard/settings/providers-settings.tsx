@@ -42,7 +42,7 @@ interface ProviderApiState {
 export function ProvidersSettings() {
   const [providers, setProviders] = useState(providerCatalog);
   const [profiles, setProfiles] = useState<AuthProfile[]>([]);
-  const [currentModel, setCurrentModel] = useState("minimax/MiniMax-M2.7");
+  const [currentModel, setCurrentModel] = useState("minimax/MiniMax-M2.1");
   const [search, setSearch] = useState("");
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(false);
@@ -59,7 +59,7 @@ export function ProvidersSettings() {
       const data = await response.json() as ProviderApiState;
       setProviders(data.providers);
       setProfiles(data.profiles);
-      setCurrentModel(data.defaultModel || "minimax/MiniMax-M2.7");
+      setCurrentModel(data.defaultModel || "minimax/MiniMax-M2.1");
       setRecentProviderId(data.recentProviderId || "minimax");
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Failed to load providers");
@@ -112,9 +112,26 @@ export function ProvidersSettings() {
 
   function syncConnectedProvider(providerId: string, profile: AuthProfile, models: string[], defaultModel?: string) {
     const updatedAt = profile.updatedAt || new Date().toISOString();
-    setProviders((previous) => previous.map((provider) => provider.id === providerId ? { ...provider, configured: true, tokenRef: profile.tokenRef, updatedAt, models, defaultModel } : provider));
+    setProviders((previous) => previous.map((provider) => provider.id === providerId ? { ...provider, configured: true, tokenRef: profile.tokenRef, updatedAt, models, defaultModel, modelsFromProfile: models.length > 0, modelsSource: models.length > 0 ? "profile" : "unavailable" } : provider));
     setProfiles((previous) => [...previous.filter((item) => item.provider !== providerId), { ...profile, models, defaultModel, updatedAt }]);
     setRecentProviderId(providerId);
+  }
+
+  function syncProviderModels(providerId: string, models: string[], source: ProviderMeta["modelsSource"], profile?: AuthProfile | null, defaultModel?: string) {
+    const updatedAt = profile?.updatedAt || new Date().toISOString();
+    setProviders((previous) => previous.map((provider) => provider.id === providerId ? {
+      ...provider,
+      configured: true,
+      tokenRef: profile?.tokenRef || provider.tokenRef,
+      updatedAt,
+      models: models.length > 0 ? models : provider.models,
+      defaultModel,
+      modelsFromProfile: source === "api" || source === "profile",
+      modelsSource: source,
+    } : provider));
+    if (profile) {
+      setProfiles((previous) => [...previous.filter((item) => item.provider !== providerId), { ...profile, models, defaultModel, updatedAt }]);
+    }
   }
 
   function disconnectProvider(providerId: string) {
@@ -145,6 +162,7 @@ export function ProvidersSettings() {
         recentProviderId={recentProviderId}
         onModelSelected={setCurrentModel}
         onConnectProvider={openProvider}
+        onModelsRefreshed={syncProviderModels}
       />
 
       {loadError && <Alert variant="destructive"><AlertCircle /><AlertTitle>Providers unavailable</AlertTitle><AlertDescription>{loadError}</AlertDescription></Alert>}
@@ -176,17 +194,18 @@ export function ProvidersSettings() {
   );
 }
 
-function DefaultModelSelector({ providers, profiles, currentModel, recentProviderId, onModelSelected, onConnectProvider }: { providers: ProviderMeta[]; profiles: AuthProfile[]; currentModel: string; recentProviderId: string | null; onModelSelected: (modelSpec: string) => void; onConnectProvider: (providerId: string) => void }) {
+function DefaultModelSelector({ providers, profiles, currentModel, recentProviderId, onModelSelected, onConnectProvider, onModelsRefreshed }: { providers: ProviderMeta[]; profiles: AuthProfile[]; currentModel: string; recentProviderId: string | null; onModelSelected: (modelSpec: string) => void; onConnectProvider: (providerId: string) => void; onModelsRefreshed: (providerId: string, models: string[], source: ProviderMeta["modelsSource"], profile?: AuthProfile | null, defaultModel?: string) => void }) {
   const connectedProviders = useMemo(() => providers.filter((provider) => provider.configured && isModelProvider(provider)), [providers]);
   const currentProviderId = currentModel.includes("/") ? currentModel.split("/", 2)[0] : null;
   const currentModelId = currentModel.includes("/") ? currentModel.split("/", 2)[1] : currentModel;
   const [providerId, setProviderId] = useState(recentProviderId ?? currentProviderId ?? connectedProviders[0]?.id ?? "");
   const selectedProvider = providers.find((provider) => provider.id === providerId);
-  const [modelId, setModelId] = useState(currentModelId || selectedProvider?.recommendedModel || selectedProvider?.models?.[0] || "");
+  const selectedProviderModels = selectedProvider?.modelsFromProfile ? selectedProvider.models || [] : [];
+  const [modelId, setModelId] = useState(currentModelId || selectedProviderModels[0] || "");
   const [manualModelId, setManualModelId] = useState("");
   const [loadingModels, setLoadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
-  const models = selectedProvider?.models || [];
+  const models = selectedProviderModels;
 
   async function refreshModels() {
     if (!providerId) return;
@@ -198,8 +217,13 @@ function DefaultModelSelector({ providers, profiles, currentModel, recentProvide
         body: JSON.stringify({ action: "refresh-models", provider: providerId }),
       });
       if (!response.ok) throw new Error("Failed to refresh models");
+      const data = await response.json() as { models?: Array<{ id?: string }>; source?: string; defaultModel?: string; profile?: AuthProfile | null };
+      const modelIds = Array.isArray(data.models) ? data.models.map((model) => model.id).filter((id): id is string => Boolean(id)) : [];
+      const modelsFromProfile = data.source === "api" && modelIds.length > 0;
+      onModelsRefreshed(providerId, modelIds, data.source as ProviderMeta["modelsSource"], data.profile, data.defaultModel);
+      setModelId(modelIds[0] || "");
       setLoadingModels(false);
-      toast.success("Model list refreshed");
+      toast.success(modelsFromProfile ? "Model list refreshed" : "Provider did not return a model list");
     } catch (error) {
       setLoadingModels(false);
       toast.error(error instanceof Error ? error.message : "Failed to refresh models");
@@ -256,7 +280,7 @@ function DefaultModelSelector({ providers, profiles, currentModel, recentProvide
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
               <div className="flex flex-col gap-2">
                 <Label>Default provider</Label>
-                <Select value={providerId} onValueChange={(value) => { setProviderId(value); const provider = providers.find((item) => item.id === value); setModelId(provider?.recommendedModel || provider?.models?.[0] || ""); setManualModelId(""); }}>
+                <Select value={providerId} onValueChange={(value) => { setProviderId(value); const provider = providers.find((item) => item.id === value); setModelId(provider?.modelsFromProfile ? provider.models?.[0] || "" : ""); setManualModelId(""); }}>
                   <SelectTrigger className="h-10 w-full rounded-xl"><SelectValue placeholder="Choose provider" /></SelectTrigger>
                   <SelectContent position="popper" align="start">
                     <SelectGroup>
@@ -291,7 +315,7 @@ function DefaultModelSelector({ providers, profiles, currentModel, recentProvide
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               {loadingModels && <span className="inline-flex items-center gap-1.5"><Loader2 className="size-3 animate-spin" /> Fetching models</span>}
               {!loadingModels && models.length > 0 && <span>{models.length} models available</span>}
-              {!loadingModels && models.length === 0 && providerId && <span>No model list returned; manual model ID is available.</span>}
+              {!loadingModels && models.length === 0 && providerId && <span>No API model list returned; manual model ID is available.</span>}
               {providerId && <Button variant="ghost" size="sm" onClick={refreshModels} className="h-7 gap-1.5 rounded-lg"><RefreshCw className="size-3" /> Refresh</Button>}
             </div>
           </div>
@@ -347,7 +371,7 @@ function ConnectProviderDialog({ provider, profile, onOpenChange, onConnected, o
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [defaultModel, setDefaultModel] = useState<string | undefined>();
   if (!provider) return null;
-  const models = discoveredModels.length > 0 ? discoveredModels : provider.models || [];
+  const models = connected ? discoveredModels : [];
 
   async function connect() {
     if (!provider || !keyInput.trim()) return;

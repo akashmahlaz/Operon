@@ -16,6 +16,9 @@ export interface ProviderMeta {
   tokenRef?: string;
   updatedAt?: string;
   models?: string[];
+  /** True when models array came from a live API discovery (profile or env-key). False = static catalog placeholders. */
+  modelsFromProfile?: boolean;
+  modelsSource?: "api" | "profile" | "static" | "unavailable";
 }
 
 export const recommendedProviderIds = ["github-copilot", "openai", "anthropic", "openrouter"];
@@ -44,10 +47,10 @@ export const providerCatalog: ProviderMeta[] = [
     badge: "Current",
     setup: "api-key",
     shortDescription: "MiniMax text and multimodal models.",
-    recommendedModel: "MiniMax-M2.7",
+    recommendedModel: "MiniMax-M2.1",
     tokenRef: "env:MINIMAX_API_KEY",
     updatedAt: "2026-05-01T00:00:00.000Z",
-    models: ["MiniMax-M2.7", "MiniMax-Text-01", "MiniMax-VL-01"],
+    models: ["MiniMax-M2.1", "MiniMax-M2", "MiniMax-M2.1-lightning"],
   },
   {
     id: "openai",

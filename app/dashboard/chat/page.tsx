@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -175,7 +175,7 @@ function ChatPage() {
   } | null>(null);
   const [waConnecting, setWaConnecting] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>("minimax/MiniMax-M2.7");
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("auto");
   const [providers, setProviders] = useState<ProviderMeta[]>([]);
 
@@ -199,16 +199,50 @@ function ChatPage() {
       .catch(() => {});
   }, []);
 
-  const connectedProviders = providers.filter((p) => p.configured && isModelProvider(p));
-  const modelOptions: PromptModelOption[] = connectedProviders.flatMap((provider) =>
-    (provider.models?.length ? provider.models : provider.recommendedModel ? [provider.recommendedModel] : [])
-      .slice(0, 12)
-      .map((model) => ({
-        value: `${provider.id}/${model}`,
-        label: model,
-        providerLabel: provider.name,
-      })),
-  );
+  const connectedProviders = useMemo(() => providers.filter((p) => p.configured && isModelProvider(p)), [providers]);
+  const modelOptions: PromptModelOption[] = useMemo(() => connectedProviders.flatMap((provider) => {
+    // Only show models that were actually fetched from the provider's API.
+    // providers with modelsFromProfile === false still have the static catalog
+    // placeholders — hide them until real discovery succeeds.
+    if (!provider.modelsFromProfile) return [];
+    return (provider.models ?? []).map((model) => ({
+      value: `${provider.id}/${model}`,
+      label: model,
+      providerLabel: provider.name,
+    }));
+  }), [connectedProviders]);
+
+  useEffect(() => {
+    if (modelOptions.length === 0) {
+      if (selectedModel) setSelectedModel("");
+      return;
+    }
+    if (!modelOptions.some((model) => model.value === selectedModel)) {
+      setSelectedModel(modelOptions[0].value);
+    }
+  }, [modelOptions, selectedModel]);
+
+  /** Returns true only for providers/models that actually support thinking/reasoning cost control */
+  function modelSupportsReasoning(spec: string): boolean {
+    if (!spec.includes("/")) return false;
+    const slashIdx = spec.indexOf("/");
+    const providerId = spec.slice(0, slashIdx);
+    const modelId = spec.slice(slashIdx + 1).toLowerCase();
+    if (providerId === "openai") return /^o\d/.test(modelId); // o1, o3, o4, o1-mini, o3-mini, o4-mini
+    if (providerId === "anthropic") {
+      return (
+        modelId.includes("3-7") ||
+        modelId.startsWith("claude-sonnet-4") ||
+        modelId.startsWith("claude-opus-4") ||
+        modelId.startsWith("claude-haiku-4") ||
+        modelId.startsWith("claude-4")
+      );
+    }
+    if (providerId === "google") {
+      return modelId.startsWith("gemini-2.5") || modelId.startsWith("gemini-3");
+    }
+    return false;
+  }
 
   const primaryChannel = channelStatus.whatsapp
     ? "whatsapp"
@@ -493,6 +527,10 @@ function ChatPage() {
     if (isLoading) return;
     let content = (overrideContent ?? input).trim();
     if (!content && attachedFiles.length === 0) return;
+    if (!selectedModel) {
+      toast.error("No API-backed model is available. Refresh or connect a provider in Settings.");
+      return;
+    }
 
     const uploadedFiles = attachedFiles.filter((f) => f.url);
     if (uploadedFiles.length > 0) {
@@ -1315,6 +1353,7 @@ function ChatPage() {
                   disabled={isChannelConversation}
                   isLoading={isLoading}
                   reasoningLevel={reasoningLevel}
+                  reasoningSupported={modelSupportsReasoning(selectedModel)}
                   onModelChange={setSelectedModel}
                   onReasoningLevelChange={setReasoningLevel}
                   onAttach={handleFileClick}

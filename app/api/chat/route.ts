@@ -1,4 +1,5 @@
 import { smoothStream, stepCountIs, streamText, generateObject } from "ai";
+import type { ModelMessage, UIMessage } from "ai";
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
@@ -39,16 +40,43 @@ async function generateConversationTitle(
 
 type ReasoningLevel = "auto" | "low" | "medium" | "high";
 
+// Local JSON-serializable type alias — structurally identical to the AI SDK's
+// JSONObject / SharedV3ProviderOptions so we can return correctly-typed provider option maps.
+type JSONVal = string | number | boolean | null | JSONVal[] | { [k: string]: JSONVal };
+type ProviderOptionMap = Record<string, Record<string, JSONVal>>;
+
 function providerIdFromSpec(modelSpec: string | null) {
   if (!modelSpec || !modelSpec.includes("/")) return null;
   return modelSpec.slice(0, modelSpec.indexOf("/"));
 }
 
+function modelSupportsReasoning(modelSpec: string | null) {
+  if (!modelSpec || !modelSpec.includes("/")) return false;
+  const slashIndex = modelSpec.indexOf("/");
+  const providerId = modelSpec.slice(0, slashIndex);
+  const modelId = modelSpec.slice(slashIndex + 1).toLowerCase();
+  if (providerId === "openai") return /^o\d/.test(modelId);
+  if (providerId === "anthropic") {
+    return (
+      modelId.includes("3-7") ||
+      modelId.startsWith("claude-sonnet-4") ||
+      modelId.startsWith("claude-opus-4") ||
+      modelId.startsWith("claude-haiku-4") ||
+      modelId.startsWith("claude-4")
+    );
+  }
+  if (providerId === "google") return modelId.startsWith("gemini-2.5") || modelId.startsWith("gemini-3");
+  return false;
+}
+
 function reasoningProviderOptions(
-  providerId: string | null,
+  modelSpec: string | null,
   reasoningLevel: ReasoningLevel,
-): Record<string, Record<string, string>> | undefined {
+): ProviderOptionMap | undefined {
   if (reasoningLevel === "auto") return undefined;
+  if (!modelSupportsReasoning(modelSpec)) return undefined;
+
+  const providerId = providerIdFromSpec(modelSpec);
 
   if (providerId === "openai") {
     return {
@@ -60,9 +88,21 @@ function reasoningProviderOptions(
   }
 
   if (providerId === "anthropic") {
+    // claude-3-7 and claude-4 support extended thinking via budgetTokens
+    const budgetTokens =
+      reasoningLevel === "low" ? 2048 : reasoningLevel === "medium" ? 8192 : 32000;
     return {
       anthropic: {
-        effort: reasoningLevel,
+        thinking: { type: "enabled", budgetTokens },
+      },
+    };
+  }
+
+  if (providerId === "google") {
+    // gemini-2.5+ supports thinkingConfig.thinkingLevel
+    return {
+      google: {
+        thinkingConfig: { thinkingLevel: reasoningLevel }, // "low" | "medium" | "high"
       },
     };
   }
@@ -181,6 +221,28 @@ export async function POST(req: Request) {
   const modelMessages = await toModelMessages(messages);
   const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
   const lastUserText = lastUserMessage ? textFromParts(lastUserMessage.parts) : "";
+
+  // Build full model message history from DB for multi-turn context
+  let fullModelMessages: ModelMessage[] = modelMessages;
+  if (conversationId) {
+    try {
+      const histConv = await getConversation(conversationId, userId);
+      if (histConv?.messages && histConv.messages.length > 1) {
+        const uiMessages = histConv.messages
+          .filter((m: { role: string }) => m.role === "user" || m.role === "assistant")
+          .map((m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            parts: (Array.isArray(m.parts) && m.parts.length > 0)
+              ? m.parts as UIMessage["parts"]
+              : [{ type: "text" as const, text: m.content || "" }],
+          })) as UIMessage[];
+        fullModelMessages = await toModelMessages(uiMessages);
+      }
+    } catch {
+      // History load failed — fall back to current message only
+    }
+  }
   const persona = await getPersonaForChannel(userId, body.channel ?? "web");
   const [memoryContext, snap] = await Promise.all([
     persona.memoryEnabled
@@ -246,8 +308,8 @@ const capabilitySnapshot = dynamicPrefixParts.join("\n");
     model: await getChatModel(userId, modelSpec ?? undefined, persona.model),
     tools,
     system: systemPrompt,
-    messages: modelMessages,
-    providerOptions: reasoningProviderOptions(providerIdFromSpec(modelSpec), reasoningLevel),
+    messages: fullModelMessages,
+    providerOptions: reasoningProviderOptions(modelSpec, reasoningLevel),
     temperature: persona.temperature,
     topP: persona.topP,
     maxOutputTokens: persona.maxTokens && persona.maxTokens > 0 ? persona.maxTokens : undefined,

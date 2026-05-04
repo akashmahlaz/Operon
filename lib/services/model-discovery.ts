@@ -7,10 +7,18 @@ export interface DiscoveredModel {
   provider: string;
 }
 
-const cache = new Map<string, { models: DiscoveredModel[]; createdAt: number }>();
+export type ModelDiscoverySource = "api" | "static" | "unavailable";
+
+export interface ModelDiscoveryResult {
+  models: DiscoveredModel[];
+  source: ModelDiscoverySource;
+}
+
+const cache = new Map<string, { result: ModelDiscoveryResult; createdAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 const MODEL_ENDPOINTS: Record<string, string> = {
+  minimax: "https://api.minimax.io/v1/models",
   openai: "https://api.openai.com/v1/models",
   openrouter: "https://openrouter.ai/api/v1/models",
   github: "https://models.inference.ai.azure.com/models",
@@ -67,6 +75,28 @@ async function fetchGoogleModels(apiKey: string) {
   return normalizeModelRows("google", json.models || []).filter((model) => model.id.includes("gemini"));
 }
 
+async function fetchAnthropicModels(apiKey: string) {
+  const response = await fetch("https://api.anthropic.com/v1/models", {
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      Accept: "application/json",
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Model fetch failed for anthropic: ${response.status} ${text}`.trim());
+  }
+  const json = await response.json() as { data?: Array<{ id?: string; display_name?: string; displayName?: string }> };
+  return normalizeModelRows(
+    "anthropic",
+    (json.data || []).map((model) => ({
+      id: model.id,
+      displayName: model.display_name || model.displayName,
+    })),
+  );
+}
+
 function staticModels(providerId: string) {
   return (STATIC_MODELS[providerId] || []).map((id) => ({ id, name: id, provider: providerId }));
 }
@@ -84,29 +114,55 @@ export async function discoverModels({
   baseUrl?: string;
   force?: boolean;
 }) {
+  const result = await discoverModelsWithSource({ providerId, userId, apiKey, baseUrl, force });
+  return result.models;
+}
+
+export async function discoverModelsWithSource({
+  providerId,
+  userId,
+  apiKey,
+  baseUrl,
+  force = false,
+}: {
+  providerId: string;
+  userId?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  force?: boolean;
+}): Promise<ModelDiscoveryResult> {
   const cacheKey = `${userId || "env"}:${providerId}:${baseUrl || ""}`;
   const cached = cache.get(cacheKey);
-  if (!force && !apiKey && cached && Date.now() - cached.createdAt < CACHE_TTL_MS) return cached.models;
+  if (!force && !apiKey && cached && Date.now() - cached.createdAt < CACHE_TTL_MS) return cached.result;
 
   const key = apiKey || await resolveProviderKey(providerId, userId);
-  if (!key) return staticModels(providerId);
+  if (!key) return { models: staticModels(providerId), source: "static" };
 
   let models: DiscoveredModel[] = [];
   if (providerId === "google") {
     models = await fetchGoogleModels(key);
   } else if (providerId === "anthropic") {
-    models = staticModels(providerId);
+    models = await fetchAnthropicModels(key);
   } else {
     const endpoint = baseUrl ? appendPath(baseUrl, "models") : MODEL_ENDPOINTS[providerId];
-    models = endpoint ? await fetchOpenAICompatible(providerId, endpoint, key) : staticModels(providerId);
+    if (!endpoint) return { models: [], source: "unavailable" };
+    models = await fetchOpenAICompatible(providerId, endpoint, key);
   }
 
-  if (models.length === 0) models = staticModels(providerId);
-  if (!apiKey) cache.set(cacheKey, { models, createdAt: Date.now() });
-  return models;
+  const result: ModelDiscoveryResult = {
+    models,
+    source: models.length > 0 ? "api" : "unavailable",
+  };
+  if (!apiKey) cache.set(cacheKey, { result, createdAt: Date.now() });
+  return result;
 }
 
 export function defaultModelFor(providerId: string, models: string[] = []) {
   const provider = providerCatalog.find((item) => item.id === providerId);
-  return provider?.recommendedModel || models[0] || provider?.models?.[0] || "gpt-4.1";
+  if (models.length > 0) {
+    return provider?.recommendedModel && models.includes(provider.recommendedModel)
+      ? provider.recommendedModel
+      : models[0];
+  }
+  return provider?.recommendedModel || provider?.models?.[0] || "gpt-4.1";
 }

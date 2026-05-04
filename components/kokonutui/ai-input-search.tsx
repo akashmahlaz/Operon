@@ -29,6 +29,7 @@ interface AIInputSearchProps {
   models: PromptModelOption[];
   selectedModel: string;
   reasoningLevel: ReasoningLevel;
+  reasoningSupported?: boolean;
   placeholder?: string;
   disabled?: boolean;
   isLoading?: boolean;
@@ -85,6 +86,7 @@ export default function AI_Input_Search({
   models,
   selectedModel,
   reasoningLevel,
+  reasoningSupported = false,
   placeholder = "How can I help you today?",
   disabled,
   isLoading,
@@ -102,8 +104,10 @@ export default function AI_Input_Search({
   });
 
   const selectedOption =
-    models.find((m) => m.value === selectedModel) ??
-    ({ value: selectedModel, label: compactModelLabel(selectedModel) } satisfies PromptModelOption);
+    models.length === 0
+      ? ({ value: "", label: "No API models" } satisfies PromptModelOption)
+      : models.find((m) => m.value === selectedModel) ??
+        ({ value: selectedModel, label: compactModelLabel(selectedModel) } satisfies PromptModelOption);
 
   useEffect(() => {
     adjustHeight(value.length === 0);
@@ -217,19 +221,37 @@ export default function AI_Input_Search({
           </DropdownMenu>
 
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={disabled || isLoading}
-                className="h-8 gap-1.5 rounded-full px-2.5 text-[13px] font-medium text-foreground/80 hover:text-foreground"
-              >
-                <BrainCircuit className="size-3.5 text-muted-foreground" />
-                <span className="hidden sm:inline">{reasoningLabels[reasoningLevel]}</span>
-                <ChevronDown className="size-3 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={disabled || isLoading || !reasoningSupported}
+                      className={cn(
+                        "h-8 gap-1.5 rounded-full px-2.5 text-[13px] font-medium",
+                        reasoningSupported
+                          ? "text-foreground/80 hover:text-foreground"
+                          : "cursor-not-allowed text-muted-foreground/40",
+                      )}
+                    >
+                      <BrainCircuit className="size-3.5" />
+                      <span className="hidden sm:inline">
+                        {reasoningSupported ? reasoningLabels[reasoningLevel] : "Thinking"}
+                      </span>
+                      <ChevronDown className="size-3 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </span>
+              </TooltipTrigger>
+              {!reasoningSupported && (
+                <TooltipContent side="top">
+                  Thinking not supported by this model
+                </TooltipContent>
+              )}
+            </Tooltip>
             <DropdownMenuContent align="start" side="top" className="min-w-40 rounded-xl p-1.5">
               {(["auto", "low", "medium", "high"] as ReasoningLevel[]).map((lvl) => (
                 <DropdownMenuItem

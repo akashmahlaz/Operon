@@ -184,6 +184,23 @@ export async function removeAuthProfile(userId: string, profileId: string) {
   await authProfiles().deleteOne({ userId, profileId });
 }
 
+export async function updateAuthProfileModels(userId: string, provider: string, models: string[], defaultModel?: string) {
+  await ensureIndexes();
+  const now = new Date().toISOString();
+  const result = await authProfiles().findOneAndUpdate(
+    { userId, provider },
+    {
+      $set: {
+        models,
+        defaultModel,
+        updatedAt: now,
+      },
+    },
+    { returnDocument: "after" },
+  );
+  return result ? toPublic(result) : null;
+}
+
 export async function resolveProviderKey(provider: string, userId?: string) {
   await ensureIndexes();
   if (userId) {
