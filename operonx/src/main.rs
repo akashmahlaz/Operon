@@ -1,3 +1,4 @@
+mod codex;
 mod config;
 mod db;
 mod http;
@@ -8,7 +9,7 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::{config::Config, state::AppState};
+use crate::{codex::CodexBridge, config::Config, state::AppState};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,6 +21,7 @@ async fn main() -> Result<()> {
     db::migrate(&pool).await?;
 
     let state = AppState {
+        codex: CodexBridge::new(config.codex_command.clone()),
         config: config.clone(),
         db: pool,
     };

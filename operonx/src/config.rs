@@ -8,6 +8,7 @@ pub struct Config {
     pub database_url: String,
     pub jwt_secret: String,
     pub web_origin: String,
+    pub codex_command: String,
     pub access_token_ttl_seconds: i64,
     pub cookie_secure: bool,
 }
@@ -23,6 +24,13 @@ impl Config {
         let jwt_secret = env::var("OPERON_JWT_SECRET").context("OPERON_JWT_SECRET is required")?;
         let web_origin =
             env::var("OPERON_WEB_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".to_owned());
+        let codex_command = env::var("OPERON_CODEX_COMMAND").unwrap_or_else(|_| {
+            if cfg!(windows) {
+                "codex.cmd".to_owned()
+            } else {
+                "codex".to_owned()
+            }
+        });
         let access_token_ttl_seconds = env::var("OPERON_ACCESS_TOKEN_TTL_SECONDS")
             .ok()
             .and_then(|value| value.parse().ok())
@@ -37,6 +45,7 @@ impl Config {
             database_url,
             jwt_secret,
             web_origin,
+            codex_command,
             access_token_ttl_seconds,
             cookie_secure,
         })

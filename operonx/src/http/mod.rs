@@ -1,4 +1,5 @@
 mod auth;
+mod codex;
 mod error;
 mod health;
 
@@ -15,6 +16,8 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
+        .route("/codex/healthz", get(codex::healthz))
+        .route("/codex/capabilities", get(codex::capabilities))
         .route("/auth/signup", post(auth::signup))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
