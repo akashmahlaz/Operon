@@ -48,8 +48,15 @@ function CodingPageInner() {
     setMessages,
     error,
   } = useStreamEvents({
-    api: "/api/chat",
+    api: "/api/coding",
     conversationId,
+    onResponse: (res) => {
+      const cid = res.headers.get("X-Conversation-Id");
+      if (cid && cid !== conversationId) {
+        setConversationId(cid);
+        router.replace(`/dashboard/coding?id=${cid}`);
+      }
+    },
   });
 
   const isLoading = status === "submitted" || status === "streaming";
@@ -58,26 +65,16 @@ function CodingPageInner() {
     if (error) toast.error(error.message);
   }, [error]);
 
-  // Ensure we have a conversation id; create one on first mount if absent.
+  // Ensure we have a conversation id; the operonx runtime auto-creates one
+  // on the first POST /api/coding, so we don't need to pre-create here.
+  // We just leave conversationId null until the first send completes.
   useEffect(() => {
     if (ensuredRef.current) return;
     ensuredRef.current = true;
     if (urlId) return; // existing session — handled by hydration effect
-    (async () => {
-      const res = await fetch("/api/conversations", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel: "coding", title: "Coding Session" }),
-      });
-      if (!res.ok) {
-        toast.error("Failed to start a coding session");
-        return;
-      }
-      const created = (await res.json()) as { _id: string };
-      setConversationId(created._id);
-      router.replace(`/dashboard/coding?id=${created._id}`);
-    })();
-  }, [urlId, router]);
+    // No-op: the conversation id is returned in the X-Conversation-Id header
+    // of the first /api/coding POST, captured below in submit().
+  }, [urlId]);
 
   // Hydrate previous messages when ?id= present.
   useEffect(() => {
@@ -85,7 +82,7 @@ function CodingPageInner() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/conversations?id=${urlId}`);
+        const res = await fetch(`/api/coding/conversations/${urlId}`);
         if (!res.ok) {
           if (!cancelled) setHydrating(false);
           return;
@@ -93,11 +90,15 @@ function CodingPageInner() {
         const data = (await res.json()) as ConversationDetail;
         if (cancelled) return;
         const hydrated: StreamingMessage[] = data.messages
-          .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "tool")
+          .filter((m) => m.role === "user" || m.role === "assistant")
           .map((m) => ({
             id: m._id,
             role: m.role === "user" ? "user" : "assistant",
-            orderedParts: hydrateMessageParts(m._id, m.parts, m.content ?? ""),
+            orderedParts: hydrateMessageParts(
+              m._id,
+              Array.isArray(m.parts) ? (m.parts as unknown[]) : undefined,
+              m.content ?? "",
+            ),
             isComplete: true,
             isStreaming: false,
           }));
@@ -120,26 +121,17 @@ function CodingPageInner() {
 
   const submit = useCallback(() => {
     const trimmed = input.trim();
-    if (!trimmed || isLoading || !conversationId) return;
+    if (!trimmed || isLoading) return;
     sendMessage(trimmed, { conversationId, channel: "coding" });
     setInput("");
     requestAnimationFrame(() => composerRef.current?.focus());
   }, [input, isLoading, conversationId, sendMessage]);
 
-  const newSession = useCallback(async () => {
-    const res = await fetch("/api/conversations", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel: "coding", title: "Coding Session" }),
-    });
-    if (!res.ok) {
-      toast.error("Failed to start a new session");
-      return;
-    }
-    const created = (await res.json()) as { _id: string };
+  const newSession = useCallback(() => {
     setMessages([]);
-    setConversationId(created._id);
-    router.replace(`/dashboard/coding?id=${created._id}`);
+    setConversationId(null);
+    ensuredRef.current = false;
+    router.replace(`/dashboard/coding`);
   }, [router, setMessages]);
 
   return (
@@ -225,9 +217,9 @@ function CodingPageInner() {
               placeholder={
                 conversationId
                   ? "Tell the coding agent what to build, fix, or explore…"
-                  : "Starting your workspace…"
+                  : "Describe what you want the agent to build…"
               }
-              disabled={!conversationId || hydrating}
+              disabled={hydrating}
               rows={2}
               className={cn(
                 "min-h-15 resize-none border-0 bg-transparent px-4 py-3 pr-14 text-sm",
@@ -250,7 +242,7 @@ function CodingPageInner() {
                   size="icon"
                   className="size-8 rounded-lg"
                   onClick={submit}
-                  disabled={!input.trim() || !conversationId || hydrating}
+                  disabled={!input.trim() || hydrating}
                   title="Send"
                 >
                   <Send className="size-4" />

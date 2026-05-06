@@ -124,6 +124,83 @@ pub async fn logout() -> AppResult<(HeaderMap, Json<serde_json::Value>)> {
     Ok((headers, Json(serde_json::json!({ "ok": true }))))
 }
 
+#[derive(Deserialize)]
+pub struct InternalExchangeRequest {
+    pub email: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+/// Trusted server-to-server endpoint: the Next.js app exchanges an
+/// authenticated NextAuth session for an operonx JWT. Auto-provisions a
+/// password-less user row on first call. Gated by `OPERON_INTERNAL_SECRET`.
+pub async fn internal_exchange(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<InternalExchangeRequest>,
+) -> AppResult<Json<AuthResponse>> {
+    let configured = state
+        .config
+        .internal_secret
+        .as_deref()
+        .ok_or(AppError::Unauthorized)?;
+    let provided = headers
+        .get("x-operon-internal-secret")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(AppError::Unauthorized)?;
+    if !constant_time_eq(provided.as_bytes(), configured.as_bytes()) {
+        return Err(AppError::Unauthorized);
+    }
+
+    validate_email(&payload.email)?;
+
+    let display_name = payload
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+
+    let row = sqlx::query(
+        "insert into users (id, email, display_name) values ($1, lower($2), $3)
+             on conflict (email) do update
+                 set display_name = coalesce(excluded.display_name, users.display_name),
+                     updated_at = now()
+             returning id, email, display_name, password_hash",
+    )
+    .bind(Uuid::now_v7())
+    .bind(payload.email.trim())
+    .bind(display_name)
+    .fetch_one(&state.db)
+    .await?;
+
+    let user = user_from_row(row)?;
+    let now = Utc::now();
+    let expires_at = now + Duration::seconds(state.config.access_token_ttl_seconds);
+    let claims = Claims {
+        sub: user.id,
+        email: user.email.clone(),
+        iat: now.timestamp() as usize,
+        exp: expires_at.timestamp() as usize,
+    };
+    let token = encode_claims(&state.config.jwt_secret, &claims)?;
+    Ok(Json(AuthResponse {
+        user: user_response(user),
+        access_token: token,
+        expires_at: expires_at.timestamp(),
+    }))
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 pub async fn me(
     State(state): State<AppState>,
     headers: HeaderMap,

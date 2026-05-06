@@ -1,79 +1,81 @@
-//! Helpers for constructing AI SDK v5 UI Message Stream Protocol frames.
-//!
-//! Every helper returns a `serde_json::Value` ready to be serialized as a
-//! single `data: {...}` SSE frame.
+//! Helpers for emitting SSE event frames in the envelope shape consumed by
+//! the in-app `useStreamEvents` hook: `{ "type": "...", "data": { ... } }`.
 
 use serde_json::{Value, json};
 
-pub fn start(message_id: &str) -> Value {
-    json!({ "type": "start", "messageId": message_id })
+pub fn reasoning_start() -> Value {
+    json!({ "type": "reasoning-start", "data": {} })
 }
 
-pub fn start_step() -> Value {
-    json!({ "type": "start-step" })
+pub fn reasoning_delta(text: &str) -> Value {
+    json!({ "type": "reasoning-delta", "data": { "text": text } })
 }
 
-pub fn finish_step() -> Value {
-    json!({ "type": "finish-step" })
+pub fn reasoning_end() -> Value {
+    json!({ "type": "reasoning-end", "data": {} })
 }
 
-pub fn finish() -> Value {
-    json!({ "type": "finish" })
+pub fn text_delta(text: &str) -> Value {
+    json!({ "type": "text-delta", "data": { "text": text } })
 }
 
-pub fn text_start(id: &str) -> Value {
-    json!({ "type": "text-start", "id": id })
+pub fn text_end() -> Value {
+    json!({ "type": "text-end", "data": {} })
 }
 
-pub fn text_delta(id: &str, delta: &str) -> Value {
-    json!({ "type": "text-delta", "id": id, "delta": delta })
-}
-
-pub fn text_end(id: &str) -> Value {
-    json!({ "type": "text-end", "id": id })
-}
-
-pub fn tool_input_start(tool_call_id: &str, tool_name: &str) -> Value {
+pub fn tool_call_start(tool_call_id: &str, tool_name: &str) -> Value {
     json!({
-        "type": "tool-input-start",
-        "toolCallId": tool_call_id,
-        "toolName": tool_name,
+        "type": "tool-call-start",
+        "data": { "toolCallId": tool_call_id, "toolName": tool_name }
     })
 }
 
-pub fn tool_input_delta(tool_call_id: &str, delta: &str) -> Value {
+pub fn tool_call_input_streaming(tool_call_id: &str, args: &Value) -> Value {
     json!({
-        "type": "tool-input-delta",
-        "toolCallId": tool_call_id,
-        "inputTextDelta": delta,
+        "type": "tool-call-input-streaming",
+        "data": { "toolCallId": tool_call_id, "args": args }
     })
 }
 
-pub fn tool_input_available(tool_call_id: &str, tool_name: &str, input: &Value) -> Value {
+pub fn tool_call_input_available(tool_call_id: &str, args: &Value) -> Value {
     json!({
-        "type": "tool-input-available",
-        "toolCallId": tool_call_id,
-        "toolName": tool_name,
-        "input": input,
+        "type": "tool-call-input-available",
+        "data": { "toolCallId": tool_call_id, "args": args }
     })
 }
 
-pub fn tool_output_available(tool_call_id: &str, output: &Value) -> Value {
+pub fn tool_call_execute(tool_call_id: &str) -> Value {
     json!({
-        "type": "tool-output-available",
-        "toolCallId": tool_call_id,
-        "output": output,
+        "type": "tool-call-execute",
+        "data": { "toolCallId": tool_call_id }
     })
 }
 
-pub fn tool_output_error(tool_call_id: &str, error_text: &str) -> Value {
+pub fn tool_call_output_available(tool_call_id: &str, result: &Value) -> Value {
     json!({
-        "type": "tool-output-error",
-        "toolCallId": tool_call_id,
-        "errorText": error_text,
+        "type": "tool-call-output-available",
+        "data": { "toolCallId": tool_call_id, "result": result }
     })
+}
+
+pub fn tool_call_output_error(tool_call_id: &str, error_text: &str) -> Value {
+    json!({
+        "type": "tool-call-output-error",
+        "data": { "toolCallId": tool_call_id, "errorText": error_text }
+    })
+}
+
+pub fn tool_call_end(tool_call_id: &str) -> Value {
+    json!({
+        "type": "tool-call-end",
+        "data": { "toolCallId": tool_call_id }
+    })
+}
+
+pub fn message_end() -> Value {
+    json!({ "type": "message-end", "data": {} })
 }
 
 pub fn error(error_text: &str) -> Value {
-    json!({ "type": "error", "errorText": error_text })
+    json!({ "type": "error", "data": { "errorText": error_text } })
 }

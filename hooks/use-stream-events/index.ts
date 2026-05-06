@@ -54,6 +54,11 @@ interface UseStreamEventsOptions {
   api: string;
   conversationId?: string | null;
   onFinished?: (message: StreamingMessage) => void;
+  /**
+   * Called once with the raw fetch Response after the POST starts streaming.
+   * Useful for reading server-assigned headers like `X-Conversation-Id`.
+   */
+  onResponse?: (res: Response) => void;
 }
 
 interface UseStreamEventsReturn {
@@ -79,6 +84,7 @@ export function useStreamEvents({
   api,
   conversationId,
   onFinished,
+  onResponse,
 }: UseStreamEventsOptions): UseStreamEventsReturn {
   const [messages, setMessages] = useState<StreamingMessage[]>([]);
   const [status, setStatus] = useState<
@@ -385,6 +391,8 @@ export function useStreamEvents({
           throw new Error("Response body is null");
         }
 
+        try { onResponse?.(res); } catch { /* ignore observer errors */ }
+
         setStatus("streaming");
 
         const reader = res.body.getReader();
@@ -428,7 +436,7 @@ export function useStreamEvents({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleEvent is defined in hook body and captures only stable refs
-    [api, conversationId, onFinished]
+    [api, conversationId, onFinished, onResponse]
   );
 
   // ---------------------------------------------------------------------------

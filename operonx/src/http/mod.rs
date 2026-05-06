@@ -1,6 +1,7 @@
 mod agent;
 mod auth;
 mod codex;
+mod conversations;
 mod error;
 mod health;
 
@@ -25,9 +26,12 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
+        .route("/auth/internal/exchange", post(auth::internal_exchange))
         .route("/agent/runs", post(agent::create_run))
         .route("/agent/runs/{id}/sse", get(agent::sse_run))
         .route("/agent/runs/{id}/cancel", post(agent::cancel_run))
+        .route("/agent/conversations", get(conversations::list_conversations))
+        .route("/agent/conversations/{id}", get(conversations::get_conversation))
         .with_state(state.clone())
         .layer(cors(state))
 }

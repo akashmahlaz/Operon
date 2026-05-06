@@ -14,6 +14,7 @@ pub struct Config {
     pub openai_api_key: Option<String>,
     pub default_agent_model: String,
     pub workspace_root: PathBuf,
+    pub internal_secret: Option<String>,
 }
 
 impl Config {
@@ -48,6 +49,9 @@ impl Config {
         let workspace_root = env::var("OPERON_WORKSPACE_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./workspaces"));
+        let internal_secret = env::var("OPERON_INTERNAL_SECRET")
+            .ok()
+            .filter(|v| !v.is_empty());
 
         Ok(Self {
             bind_addr,
@@ -60,6 +64,7 @@ impl Config {
             openai_api_key,
             default_agent_model,
             workspace_root,
+            internal_secret,
         })
     }
 }

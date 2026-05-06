@@ -135,6 +135,7 @@ pub async fn create_run(
         workspace,
         initial_user_message: prompt.to_owned(),
         db: state.db.clone(),
+        max_steps: runner::default_max_steps(),
     });
     state.agents.insert(handle);
 
@@ -247,6 +248,9 @@ pub async fn cancel_run(
         return Err(AppError::Unauthorized);
     }
 
+    if let Some(handle) = state.agents.get(&run_id) {
+        handle.cancel();
+    }
     state.agents.remove(&run_id);
 
     sqlx::query(
