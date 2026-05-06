@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, path::PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -11,6 +11,9 @@ pub struct Config {
     pub codex_command: String,
     pub access_token_ttl_seconds: i64,
     pub cookie_secure: bool,
+    pub openai_api_key: Option<String>,
+    pub default_agent_model: String,
+    pub workspace_root: PathBuf,
 }
 
 impl Config {
@@ -39,6 +42,12 @@ impl Config {
             .ok()
             .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false);
+        let openai_api_key = env::var("OPENAI_API_KEY").ok().filter(|v| !v.is_empty());
+        let default_agent_model = env::var("OPERON_AGENT_MODEL")
+            .unwrap_or_else(|_| "gpt-4o-mini".to_owned());
+        let workspace_root = env::var("OPERON_WORKSPACE_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("./workspaces"));
 
         Ok(Self {
             bind_addr,
@@ -48,6 +57,9 @@ impl Config {
             codex_command,
             access_token_ttl_seconds,
             cookie_secure,
+            openai_api_key,
+            default_agent_model,
+            workspace_root,
         })
     }
 }

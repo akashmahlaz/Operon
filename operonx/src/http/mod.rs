@@ -1,3 +1,4 @@
+mod agent;
 mod auth;
 mod codex;
 mod error;
@@ -12,6 +13,8 @@ use tower_http::cors::CorsLayer;
 
 use crate::state::AppState;
 
+pub use auth::{decode_claims_public, token_from_request};
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(health::healthz))
@@ -22,6 +25,9 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/me", get(auth::me))
+        .route("/agent/runs", post(agent::create_run))
+        .route("/agent/runs/{id}/sse", get(agent::sse_run))
+        .route("/agent/runs/{id}/cancel", post(agent::cancel_run))
         .with_state(state.clone())
         .layer(cors(state))
 }

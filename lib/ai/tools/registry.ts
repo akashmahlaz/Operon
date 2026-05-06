@@ -2,6 +2,7 @@ import type { Tool } from "ai";
 import { createGitHubTools } from "@/lib/ai/tools/github";
 import { createMemoryTools } from "@/lib/ai/tools/memory";
 import { createWorkspaceFileTools } from "@/lib/ai/tools/workspace-file";
+import { createCodingTools } from "@/lib/ai/tools/coding";
 import { getMcpTools } from "@/lib/ai/mcp-client";
 import { getAuthProfile } from "@/lib/services/auth-profiles";
 
@@ -23,7 +24,14 @@ export interface ToolDescriptor {
   description: string;
   /** Requirements that must be satisfied for the tool to be available. */
   requires?: ToolRequirement[];
-  build: (userId: string) => Record<string, Tool>;
+  /** When set, this descriptor is only included for matching channels. */
+  channels?: string[];
+  build: (userId: string, context: ToolBuildContext) => Record<string, Tool>;
+}
+
+export interface ToolBuildContext {
+  channel: string;
+  conversationId: string | null;
 }
 
 const REGISTRY: ToolDescriptor[] = [
@@ -44,6 +52,14 @@ const REGISTRY: ToolDescriptor[] = [
     category: "github",
     description: "GitHub: save token, list/read/search repos, create repos, write files. Always exposed so the agent can capture a token mid-conversation; read/write tools return a clear error if no token is configured yet.",
     build: (userId) => createGitHubTools(userId) as Record<string, Tool>,
+  },
+  {
+    name: "coding",
+    category: "coding",
+    description:
+      "Coding-session tools (file read/write, unified-diff patches, shell exec, search, plan management). Operates in a per-conversation workspace under ./workspaces/<conversationId>/.",
+    channels: ["coding"],
+    build: (userId, ctx) => createCodingTools(userId, ctx.conversationId) as Record<string, Tool>,
   },
 ];
 
@@ -80,13 +96,17 @@ export async function getToolStatuses(userId: string) {
   );
 }
 
-export async function buildAvailableTools(userId: string): Promise<Record<string, Tool>> {
+export async function buildAvailableTools(
+  userId: string,
+  context: ToolBuildContext = { channel: "web", conversationId: null },
+): Promise<Record<string, Tool>> {
   const statuses = await getToolStatuses(userId);
   const available = new Set(statuses.filter((status) => status.available).map((status) => status.name));
   const tools: Record<string, Tool> = {};
   for (const descriptor of REGISTRY) {
     if (!available.has(descriptor.name)) continue;
-    Object.assign(tools, descriptor.build(userId));
+    if (descriptor.channels && !descriptor.channels.includes(context.channel)) continue;
+    Object.assign(tools, descriptor.build(userId, context));
   }
   // Add MCP tools from user-configured servers (dynamically resolved each turn)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,268 +1,316 @@
-"use client";
+﻿"use client";
 
-import Image from "next/image";
-import { useCallback, useEffect, useState } from "react";
-import { ProviderIcon } from "@lobehub/icons";
-import { CheckCircle2, Code2, ExternalLink, Loader2, PlugZap, RefreshCw, ShieldCheck, Unplug } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Code2, Loader2, Plus, Square, Send, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { StreamingChatMessageList } from "@/components/chat/message/streaming-message";
+import { useStreamEvents } from "@/hooks/use-stream-events";
+import type { StreamingMessage } from "@/hooks/use-stream-events/types";
+import { hydrateMessageParts } from "@/lib/chat/hydrate-message-parts";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-interface GitHubViewer {
-  login: string;
-  name: string | null;
-  avatar_url: string;
-  html_url: string;
-}
-
-interface GitHubRepoSummary {
-  id: number;
-  fullName: string;
-  description: string | null;
-  private: boolean;
-  language: string | null;
-  defaultBranch: string;
+interface ConversationDetail {
+  _id: string;
+  title: string;
+  channel: string;
+  createdAt: string;
   updatedAt: string;
-  pushedAt: string | null;
-  url: string;
+  messages: Array<{
+    _id: string;
+    role: "user" | "assistant" | "system" | "tool";
+    content: string;
+    parts?: unknown[];
+    createdAt: string;
+  }>;
 }
 
-export default function CodingPage() {
-  const [token, setToken] = useState("");
-  const [viewer, setViewer] = useState<GitHubViewer | null>(null);
-  const [repos, setRepos] = useState<GitHubRepoSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [connecting, setConnecting] = useState(false);
-  const [repoLoading, setRepoLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function CodingPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const urlId = searchParams.get("id");
 
-  const loadRepos = useCallback(async () => {
-    setRepoLoading(true);
-    try {
-      const response = await fetch("/api/github?action=repos&perPage=30", { cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error || "Failed to load repositories");
-      setRepos(Array.isArray(data.repos) ? data.repos : []);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load repositories");
-    } finally {
-      setRepoLoading(false);
-    }
-  }, []);
+  const [conversationId, setConversationId] = useState<string | null>(urlId);
+  const [hydrating, setHydrating] = useState<boolean>(Boolean(urlId));
+  const [input, setInput] = useState("");
+  const ensuredRef = useRef(false);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  const loadStatus = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/github?action=status", { cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error || "Failed to load GitHub status");
-      setViewer(data.connected ? data.viewer : null);
-      if (data.connected) await loadRepos();
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to load GitHub status");
-    } finally {
-      setLoading(false);
-    }
-  }, [loadRepos]);
+  const {
+    messages,
+    sendMessage,
+    status,
+    stop,
+    setMessages,
+    error,
+  } = useStreamEvents({
+    api: "/api/chat",
+    conversationId,
+  });
+
+  const isLoading = status === "submitted" || status === "streaming";
 
   useEffect(() => {
-    queueMicrotask(() => {
-      void loadStatus();
+    if (error) toast.error(error.message);
+  }, [error]);
+
+  // Ensure we have a conversation id; create one on first mount if absent.
+  useEffect(() => {
+    if (ensuredRef.current) return;
+    ensuredRef.current = true;
+    if (urlId) return; // existing session — handled by hydration effect
+    (async () => {
+      const res = await fetch("/api/conversations", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: "coding", title: "Coding Session" }),
+      });
+      if (!res.ok) {
+        toast.error("Failed to start a coding session");
+        return;
+      }
+      const created = (await res.json()) as { _id: string };
+      setConversationId(created._id);
+      router.replace(`/dashboard/coding?id=${created._id}`);
+    })();
+  }, [urlId, router]);
+
+  // Hydrate previous messages when ?id= present.
+  useEffect(() => {
+    if (!urlId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/conversations?id=${urlId}`);
+        if (!res.ok) {
+          if (!cancelled) setHydrating(false);
+          return;
+        }
+        const data = (await res.json()) as ConversationDetail;
+        if (cancelled) return;
+        const hydrated: StreamingMessage[] = data.messages
+          .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "tool")
+          .map((m) => ({
+            id: m._id,
+            role: m.role === "user" ? "user" : "assistant",
+            orderedParts: hydrateMessageParts(m._id, m.parts, m.content ?? ""),
+            isComplete: true,
+            isStreaming: false,
+          }));
+        setMessages(hydrated);
+      } finally {
+        if (!cancelled) setHydrating(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [urlId, setMessages]);
+
+  // Auto-scroll on new content.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, isLoading]);
+
+  const submit = useCallback(() => {
+    const trimmed = input.trim();
+    if (!trimmed || isLoading || !conversationId) return;
+    sendMessage(trimmed, { conversationId, channel: "coding" });
+    setInput("");
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [input, isLoading, conversationId, sendMessage]);
+
+  const newSession = useCallback(async () => {
+    const res = await fetch("/api/conversations", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: "coding", title: "Coding Session" }),
     });
-  }, [loadStatus]);
-
-  async function connectGitHub() {
-    if (!token.trim()) return;
-    setConnecting(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/github", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: token.trim() }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error || "GitHub connection failed");
-      setViewer(data.viewer);
-      setRepos(Array.isArray(data.repos) ? data.repos : []);
-      setToken("");
-      toast.success(`Connected GitHub as ${data.viewer.login}`);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "GitHub connection failed");
-    } finally {
-      setConnecting(false);
+    if (!res.ok) {
+      toast.error("Failed to start a new session");
+      return;
     }
-  }
-
-  async function disconnectGitHub() {
-    try {
-      const response = await fetch("/api/github", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "disconnect" }),
-      });
-      if (!response.ok) throw new Error("Failed to disconnect GitHub");
-      setViewer(null);
-      setRepos([]);
-      toast.success("GitHub disconnected");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to disconnect GitHub");
-    }
-  }
+    const created = (await res.json()) as { _id: string };
+    setMessages([]);
+    setConversationId(created._id);
+    router.replace(`/dashboard/coding?id=${created._id}`);
+  }, [router, setMessages]);
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-5xl p-6">
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="font-heading text-2xl font-bold tracking-tight">Coding</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">Connect GitHub so Operon can inspect repos, read files, and prepare code work from chat.</p>
+    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <Code2 className="size-4" />
           </div>
-          <Badge variant={viewer ? "default" : "outline"} className="w-fit gap-1.5 rounded-full">
-            {viewer ? <CheckCircle2 className="size-3.5" /> : <PlugZap className="size-3.5" />}
-            {viewer ? "GitHub connected" : "GitHub not connected"}
-          </Badge>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold leading-tight">Coding Session</span>
+            <span className="text-[11px] text-muted-foreground leading-tight">
+              {conversationId ? (
+                <span className="font-mono">workspaces/{conversationId.slice(0, 8)}…</span>
+              ) : (
+                "starting…"
+              )}
+            </span>
+          </div>
         </div>
 
-        {error && (
-          <Alert variant="destructive" className="mb-4">
-            <AlertTitle>Connection issue</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
+        <div className="flex items-center gap-2">
+          {conversationId && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    void navigator.clipboard
+                      .writeText(`./workspaces/${conversationId}`)
+                      .then(() => toast.success("Workspace path copied"));
+                  }}
+                >
+                  <FolderOpen className="size-3.5" />
+                  <span className="text-xs">Copy path</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                Copy <span className="font-mono">./workspaces/{conversationId}</span>
+              </TooltipContent>
+            </Tooltip>
+          )}
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={newSession}>
+            <Plus className="size-3.5" />
+            <span className="text-xs">New session</span>
+          </Button>
+        </div>
+      </div>
 
-        <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <span className="flex size-11 items-center justify-center rounded-xl border border-border bg-background">
-                  <ProviderIcon provider="github" size={26} type="color" />
-                </span>
-                <div>
-                  <CardTitle>GitHub connector</CardTitle>
-                  <CardDescription>Personal access token based setup</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {loading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-10" />
-                  <Skeleton className="h-20" />
-                </div>
-              ) : viewer ? (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3 rounded-xl border border-border p-3">
-                    <Image src={viewer.avatar_url} alt="" width={40} height={40} unoptimized className="size-10 rounded-full" />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{viewer.name || viewer.login}</p>
-                      <a href={viewer.html_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                        @{viewer.login} <ExternalLink className="size-3" />
-                      </a>
-                    </div>
-                  </div>
-                  <Alert>
-                    <ShieldCheck />
-                    <AlertTitle>Ready for coding tasks</AlertTitle>
-                    <AlertDescription>Operon can now use this token for repository listing and code-aware GitHub operations.</AlertDescription>
-                  </Alert>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={loadRepos} disabled={repoLoading} className="flex-1 gap-2 rounded-xl">
-                      {repoLoading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-                      Refresh repos
-                    </Button>
-                    <Button variant="ghost" onClick={disconnectGitHub} className="gap-2 rounded-xl text-destructive hover:text-destructive">
-                      <Unplug className="size-4" /> Disconnect
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="github-token">GitHub token</Label>
-                    <Input
-                      id="github-token"
-                      type="password"
-                      value={token}
-                      onChange={(event) => setToken(event.target.value)}
-                      placeholder="ghp_... or github_pat_..."
-                      className="rounded-xl font-mono text-xs"
-                      autoComplete="off"
-                    />
-                    <p className="text-xs text-muted-foreground">Use a fine-grained token with repository read access. Add contents write later when you want Operon to push code.</p>
-                  </div>
-                  <Button onClick={connectGitHub} disabled={connecting || !token.trim()} className="w-full gap-2 rounded-xl">
-                    {connecting ? <Loader2 className="size-4 animate-spin" /> : <Code2 className="size-4" />}
-                    Connect and fetch repos
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="mx-auto max-w-3xl">
+          {hydrating ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="mr-2 size-4 animate-spin" />
+              <span className="text-sm">Loading session…</span>
+            </div>
+          ) : messages.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <StreamingChatMessageList messages={messages} isLoading={isLoading} />
+          )}
+        </div>
+      </div>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <CardTitle>Repositories</CardTitle>
-                  <CardDescription>{viewer ? "Recently pushed repositories from your GitHub account" : "Connect GitHub to see repositories here"}</CardDescription>
-                </div>
-                {repos.length > 0 && <Badge variant="secondary" className="rounded-full">{repos.length}</Badge>}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {repoLoading ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-10" />
-                  <Skeleton className="h-10" />
-                  <Skeleton className="h-10" />
-                </div>
-              ) : repos.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Repository</TableHead>
-                      <TableHead>Language</TableHead>
-                      <TableHead>Branch</TableHead>
-                      <TableHead className="text-right">Open</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {repos.map((repo) => (
-                      <TableRow key={repo.id}>
-                        <TableCell className="max-w-80 whitespace-normal">
-                          <div className="font-medium">{repo.fullName}</div>
-                          <div className="line-clamp-1 text-xs text-muted-foreground">{repo.description || "No description"}</div>
-                        </TableCell>
-                        <TableCell>{repo.language || "-"}</TableCell>
-                        <TableCell className="font-mono text-xs">{repo.defaultBranch}</TableCell>
-                        <TableCell className="text-right">
-                          <Button asChild variant="ghost" size="icon-sm" aria-label={`Open ${repo.fullName}`}>
-                            <a href={repo.url} target="_blank" rel="noreferrer"><ExternalLink className="size-4" /></a>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-14 text-center">
-                  <Code2 className="mb-3 size-9 text-muted-foreground" />
-                  <p className="text-sm font-medium">No repositories loaded</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Connect GitHub and Operon will fetch your repo list immediately.</p>
-                </div>
+      {/* Composer */}
+      <div className="border-t border-border/40 bg-background/95 px-4 py-3 backdrop-blur">
+        <div className="mx-auto max-w-3xl">
+          <div className="relative rounded-xl border border-border/60 bg-card shadow-sm focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30">
+            <Textarea
+              ref={composerRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder={
+                conversationId
+                  ? "Tell the coding agent what to build, fix, or explore…"
+                  : "Starting your workspace…"
+              }
+              disabled={!conversationId || hydrating}
+              rows={2}
+              className={cn(
+                "min-h-15 resize-none border-0 bg-transparent px-4 py-3 pr-14 text-sm",
+                "shadow-none focus-visible:ring-0 focus-visible:ring-offset-0",
               )}
-            </CardContent>
-          </Card>
+            />
+            <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
+              {isLoading ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 rounded-lg"
+                  onClick={() => stop()}
+                  title="Stop"
+                >
+                  <Square className="size-4 fill-current" />
+                </Button>
+              ) : (
+                <Button
+                  size="icon"
+                  className="size-8 rounded-lg"
+                  onClick={submit}
+                  disabled={!input.trim() || !conversationId || hydrating}
+                  title="Send"
+                >
+                  <Send className="size-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>Enter to send · Shift+Enter for newline</span>
+            <span className="font-mono">channel: coding · max 200 steps/turn</span>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
+function EmptyState() {
+  const examples = [
+    "Build a Next.js todo app with Tailwind and SQLite persistence",
+    "Scaffold a Rust CLI that converts Markdown to HTML using pulldown-cmark",
+    "Create a small Express + TypeScript REST API with Vitest tests",
+    "Initialise a Vite + React + shadcn project and add a working dashboard",
+  ];
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="mb-3 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+        <Code2 className="size-6" />
+      </div>
+      <h2 className="text-lg font-semibold">Start a coding session</h2>
+      <p className="mt-1 max-w-md text-sm text-muted-foreground">
+        The agent runs in an isolated per-conversation workspace and can read,
+        write, patch, search, and execute commands. Long sessions are expected.
+      </p>
+      <div className="mt-6 grid w-full max-w-xl gap-2">
+        {examples.map((ex) => (
+          <div
+            key={ex}
+            className="rounded-lg border border-border/50 bg-card/50 px-3 py-2 text-left text-sm text-muted-foreground"
+          >
+            {ex}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function CodingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center text-muted-foreground">
+          <Loader2 className="mr-2 size-4 animate-spin" />
+          <span className="text-sm">Loading coding workspace…</span>
+        </div>
+      }
+    >
+      <CodingPageInner />
+    </Suspense>
+  );
+}
+

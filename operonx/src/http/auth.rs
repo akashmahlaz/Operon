@@ -290,6 +290,25 @@ fn parse_token(token: &str) -> AppResult<(&str, &str, &str)> {
     Ok((version, claims, signature))
 }
 
+/// Bearer header → cookie → optional query-string fallback.
+pub fn token_from_request<'a>(
+    headers: &'a HeaderMap,
+    fallback: Option<&'a str>,
+) -> Option<&'a str> {
+    if let Some(token) = token_from_headers(headers) {
+        return Some(token);
+    }
+    fallback.map(|t| t.trim()).filter(|t| !t.is_empty())
+}
+
+/// Verify token + return the user id (`sub` claim).
+pub fn decode_claims_public(
+    state: &AppState,
+    token: &str,
+) -> AppResult<Uuid> {
+    Ok(decode_claims(state, token)?.sub)
+}
+
 fn token_from_headers(headers: &HeaderMap) -> Option<&str> {
     if let Some(header_value) = headers
         .get(header::AUTHORIZATION)

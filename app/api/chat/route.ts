@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { textFromParts, toModelMessages } from "@/lib/ai/convert";
 import { getChatModel } from "@/lib/ai/provider";
 import { OPERON_SYSTEM_PROMPT, buildCapabilitySnapshot } from "@/lib/ai/system-prompt";
+import { OPERON_CODING_SYSTEM_PROMPT, stepBudgetForChannel } from "@/lib/ai/coding-prompt";
 import { buildAvailableTools } from "@/lib/ai/tools/registry";
 import { autoExtractMemory } from "@/lib/ai/memory-extractor";
 import { memory } from "@/lib/memory";
@@ -301,8 +302,10 @@ const capabilitySnapshot = dynamicPrefixParts.join("\n");
     dateTimeContext = `DATE/TIME CONTEXT:\n- User's local time: ${localTime} (${tz})\n- UTC: ${utcTime}`;
   } catch { /* invalid tz — skip */ }
 
-  const systemPrompt = [OPERON_SYSTEM_PROMPT, capabilitySnapshot, dateTimeContext, personaPrompt, memoryContext].filter(Boolean).join("\n\n");
-  const tools = await buildAvailableTools(userId);
+  const channel: string = typeof body?.channel === "string" ? body.channel : "web";
+  const codingAddendum = channel === "coding" ? OPERON_CODING_SYSTEM_PROMPT : "";
+  const systemPrompt = [OPERON_SYSTEM_PROMPT, capabilitySnapshot, dateTimeContext, personaPrompt, memoryContext, codingAddendum].filter(Boolean).join("\n\n");
+  const tools = await buildAvailableTools(userId, { channel, conversationId });
 
   const result = streamText({
     model: await getChatModel(userId, modelSpec ?? undefined, persona.model),
@@ -315,7 +318,7 @@ const capabilitySnapshot = dynamicPrefixParts.join("\n");
     maxOutputTokens: persona.maxTokens && persona.maxTokens > 0 ? persona.maxTokens : undefined,
     frequencyPenalty: persona.frequencyPenalty,
     presencePenalty: persona.presencePenalty,
-    stopWhen: stepCountIs(8),
+    stopWhen: stepCountIs(stepBudgetForChannel(channel)),
     experimental_transform: smoothStream({ delayInMs: 18, chunking: "word" }),
     experimental_onToolCallFinish: async (event) => {
       await appendLog({

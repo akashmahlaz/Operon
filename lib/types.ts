@@ -4,7 +4,7 @@
  * imported from server actions, route handlers, and client components alike.
  */
 
-export type Channel = "web" | "whatsapp" | "telegram";
+export type Channel = "web" | "whatsapp" | "telegram" | "coding";
 
 export interface ConversationSummary {
   id: string;
