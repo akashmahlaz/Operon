@@ -13,6 +13,9 @@ pub struct RunRequest {
     /// Optional pre-existing conversation id; new one is created if absent.
     #[serde(default)]
     pub conversation_id: Option<Uuid>,
+    /// Conversation channel. Defaults to coding for /api/coding and web for /api/chat proxies.
+    #[serde(default)]
+    pub channel: Option<String>,
     /// Optional workspace path override (must already exist & be inside the
     /// configured workspace root).
     #[serde(default)]

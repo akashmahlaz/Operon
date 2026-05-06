@@ -43,8 +43,6 @@ const DEFAULT_MAX_STEPS: usize = 200;
 #[derive(Clone)]
 pub struct RunHandle {
     pub run_id: RunId,
-    pub user_id: Uuid,
-    pub conversation_id: Uuid,
     pub broadcast: broadcast::Sender<AgentEvent>,
     pub cancel: CancellationToken,
     sequence: Arc<Mutex<i64>>,
@@ -52,12 +50,10 @@ pub struct RunHandle {
 }
 
 impl RunHandle {
-    fn new(run_id: RunId, user_id: Uuid, conversation_id: Uuid, db: Pool<Postgres>) -> Self {
+    fn new(run_id: RunId, db: Pool<Postgres>) -> Self {
         let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
             run_id,
-            user_id,
-            conversation_id,
             broadcast: tx,
             cancel: CancellationToken::new(),
             sequence: Arc::new(Mutex::new(0)),
@@ -117,12 +113,7 @@ pub struct RunnerSpec {
 }
 
 pub fn spawn(spec: RunnerSpec) -> RunHandle {
-    let handle = RunHandle::new(
-        spec.run_id,
-        spec.user_id,
-        spec.conversation_id,
-        spec.db.clone(),
-    );
+    let handle = RunHandle::new(spec.run_id, spec.db.clone());
     let task_handle = handle.clone();
     let db = spec.db.clone();
     tokio::spawn(async move {
@@ -221,10 +212,6 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                         handle.emit(&events::tool_call_start(&id, &name)).await?;
                         tool_call_started[index] = true;
                     }
-                }
-                OpenAiEvent::ToolCallArgsDelta { .. } => {
-                    // Aggregated; surfaced as `tool-call-input-available` once
-                    // OpenAI emits the full tool call.
                 }
                 OpenAiEvent::Finished {
                     finish_reason: r,

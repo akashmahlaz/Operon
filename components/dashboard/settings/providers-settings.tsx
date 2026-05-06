@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { operonFetch } from "@/lib/operon-api";
 import { ProviderIcon } from "@/components/dashboard/settings/provider-icon";
 import { isModelProvider, providerCatalog, recommendedProviderIds, type ProviderMeta } from "@/components/dashboard/settings/provider-catalog";
 
@@ -54,10 +55,10 @@ export function ProvidersSettings() {
     setLoading(true);
     setLoadError(null);
     try {
-      const response = await fetch("/api/providers", { cache: "no-store" });
+      const response = await operonFetch("/providers");
       if (!response.ok) throw new Error("Failed to load providers");
       const data = await response.json() as ProviderApiState;
-      setProviders(data.providers);
+      setProviders(data.providers?.length ? data.providers : providerCatalog);
       setProfiles(data.profiles);
       setCurrentModel(data.defaultModel || "minimax/MiniMax-M2.1");
       setRecentProviderId(data.recentProviderId || "minimax");
@@ -143,7 +144,7 @@ export function ProvidersSettings() {
   async function disconnectProviderRemote(providerId: string) {
     const profile = profiles.find((item) => item.provider === providerId);
     const profileId = profile?.profileId || `${providerId}:api_key`;
-    const response = await fetch(`/api/providers?profileId=${encodeURIComponent(profileId)}&provider=${encodeURIComponent(providerId)}`, { method: "DELETE" });
+    const response = await operonFetch(`/providers/${encodeURIComponent(providerId)}/profiles/${encodeURIComponent(profileId)}`, { method: "DELETE" });
     if (!response.ok) throw new Error("Failed to disconnect provider");
     disconnectProvider(providerId);
   }
@@ -211,7 +212,7 @@ function DefaultModelSelector({ providers, profiles, currentModel, recentProvide
     if (!providerId) return;
     setLoadingModels(true);
     try {
-      const response = await fetch("/api/providers", {
+      const response = await operonFetch("/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "refresh-models", provider: providerId }),
@@ -236,7 +237,7 @@ function DefaultModelSelector({ providers, profiles, currentModel, recentProvide
     setSaving(true);
     try {
       const spec = `${providerId}/${selectedModelId}`;
-      const response = await fetch("/api/providers", {
+      const response = await operonFetch("/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "set-default", model: spec }),
@@ -378,7 +379,7 @@ function ConnectProviderDialog({ provider, profile, onOpenChange, onConnected, o
     setConnecting(true);
     setError(null);
     try {
-      const response = await fetch("/api/providers", {
+      const response = await operonFetch("/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: provider.id, apiKey: keyInput.trim(), baseUrl: baseUrlInput.trim() || undefined }),

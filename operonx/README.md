@@ -14,7 +14,19 @@ Rust backend for Operon. The Next.js app remains the frontend while backend resp
 
 ## Local Setup
 
-Install PostgreSQL 18 and create an `operon` database. For Windows Rust builds, install either Visual Studio Build Tools with the Visual C++ workload or a GNU toolchain that provides `gcc.exe` and `dlltool.exe`.
+Start the local PostgreSQL database from the repository root:
+
+```powershell
+docker compose up -d postgres
+```
+
+The development database URL is:
+
+```text
+postgres://postgres:operon_dev@localhost:5432/operon
+```
+
+For Windows Rust builds, install either Visual Studio Build Tools with the Visual C++ workload or a GNU toolchain that provides `gcc.exe` and `dlltool.exe`.
 
 Copy `.env.example` to `.env` and update secrets locally.
 
@@ -23,7 +35,7 @@ cargo check
 cargo run
 ```
 
-The API listens on `127.0.0.1:8080` by default.
+The API listens on `127.0.0.1:8080` by default. In development, if that port is already occupied, `cargo run` automatically tries nearby ports such as `8081` and logs the bound address. The Next.js `/api/coding/*` proxy tries `8080` then `8081` unless `OPERON_API_URL` is set.
 
 ## Initial Routes
 

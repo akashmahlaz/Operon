@@ -15,6 +15,9 @@ pub struct Config {
     pub default_agent_model: String,
     pub workspace_root: PathBuf,
     pub internal_secret: Option<String>,
+    pub google_client_id: Option<String>,
+    pub google_client_secret: Option<String>,
+    pub oauth_redirect_base: String,
 }
 
 impl Config {
@@ -51,7 +54,14 @@ impl Config {
             .unwrap_or_else(|_| PathBuf::from("./workspaces"));
         let internal_secret = env::var("OPERON_INTERNAL_SECRET")
             .ok()
-            .filter(|v| !v.is_empty());
+            .filter(|v| !v.is_empty())
+            .or_else(|| {
+                cfg!(debug_assertions).then(|| "operon-development-secret".to_owned())
+            });
+        let google_client_id = env::var("GOOGLE_CLIENT_ID").ok().filter(|v| !v.is_empty());
+        let google_client_secret = env::var("GOOGLE_CLIENT_SECRET").ok().filter(|v| !v.is_empty());
+        let oauth_redirect_base = env::var("OPERON_OAUTH_REDIRECT_BASE")
+            .unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
 
         Ok(Self {
             bind_addr,
@@ -65,6 +75,9 @@ impl Config {
             default_agent_model,
             workspace_root,
             internal_secret,
+            google_client_id,
+            google_client_secret,
+            oauth_redirect_base,
         })
     }
 }

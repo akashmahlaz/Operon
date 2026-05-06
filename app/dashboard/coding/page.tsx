@@ -12,6 +12,7 @@ import type { StreamingMessage } from "@/hooks/use-stream-events/types";
 import { hydrateMessageParts } from "@/lib/chat/hydrate-message-parts";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { operonFetch } from "@/lib/operon-api";
 
 interface ConversationDetail {
   _id: string;
@@ -48,7 +49,7 @@ function CodingPageInner() {
     setMessages,
     error,
   } = useStreamEvents({
-    api: "/api/coding",
+    api: "/agent/runs",
     conversationId,
     onResponse: (res) => {
       const cid = res.headers.get("X-Conversation-Id");
@@ -82,7 +83,7 @@ function CodingPageInner() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/coding/conversations/${urlId}`);
+        const res = await operonFetch(`/agent/conversations/${urlId}`);
         if (!res.ok) {
           if (!cancelled) setHydrating(false);
           return;

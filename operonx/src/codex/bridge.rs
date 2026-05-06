@@ -35,6 +35,7 @@ pub enum CodexHealthStatus {
     Unavailable,
 }
 
+#[allow(dead_code)]
 impl CodexBridge {
     pub fn new(command: impl Into<String>) -> Self {
         Self {
@@ -91,6 +92,7 @@ impl CodexBridge {
     }
 }
 
+#[allow(dead_code)]
 pub struct Session {
     next_id: AtomicI64,
     writer_tx: mpsc::UnboundedSender<String>,

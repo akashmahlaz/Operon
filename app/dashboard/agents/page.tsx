@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { operonFetch } from "@/lib/operon-api";
 
 interface Agent {
   id: string;
@@ -26,7 +27,7 @@ export default function AgentsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/agents", { cache: "no-store" });
+      const res = await operonFetch("/admin/agents");
       const data = await res.json();
       setAgents(Array.isArray(data.agents) ? data.agents : []);
     } catch {
@@ -48,7 +49,7 @@ export default function AgentsPage() {
       prev.map((a) => (a.id === id || a._id === id ? { ...a, enabled: newEnabled } : a))
     );
     try {
-      const res = await fetch(`/api/agents?id=${id}`, {
+      const res = await operonFetch(`/admin/agents/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: newEnabled }),
@@ -67,7 +68,7 @@ export default function AgentsPage() {
   const deleteAgent = async (id: string) => {
     setAgents((prev) => prev.filter((a) => a.id !== id && a._id !== id));
     try {
-      const res = await fetch(`/api/agents?id=${id}`, { method: "DELETE" });
+      const res = await operonFetch(`/admin/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
       toast.success("Agent deleted");
     } catch {

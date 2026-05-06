@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { operonFetch } from "@/lib/operon-api";
 
 type PersonaState = {
   aiName: string;
@@ -106,7 +107,7 @@ export function PersonaSettings() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/persona")
+    operonFetch("/persona")
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (cancelled || !data?.persona) return;
@@ -120,7 +121,7 @@ export function PersonaSettings() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/memory")
+    operonFetch("/memory")
       .then((r) => (r.ok ? r.json() : { results: [] }))
       .then((data) => { if (!cancelled) setMemories((data.results ?? []) as MemoryFact[]); })
       .catch(() => {})
@@ -131,7 +132,7 @@ export function PersonaSettings() {
   // Load workspace files
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/workspace-files")
+    operonFetch("/workspace-files")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (!cancelled && data?.files) setWsFiles({ bootstrap: data.files.bootstrap ?? "", soul: data.files.soul ?? "", user: data.files.user ?? "" }); })
       .catch(() => {})
@@ -142,7 +143,7 @@ export function PersonaSettings() {
   async function save() {
     setSaving(true);
     try {
-      const response = await fetch("/api/persona", {
+      const response = await operonFetch("/persona", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...persona, channelOverrides }),
@@ -165,17 +166,17 @@ export function PersonaSettings() {
     setSaving(true);
     try {
       await Promise.all([
-        fetch("/api/workspace-files", {
+        operonFetch("/workspace-files", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ kind: "bootstrap", content: wsFiles.bootstrap }),
         }),
-        fetch("/api/workspace-files", {
+        operonFetch("/workspace-files", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ kind: "soul", content: wsFiles.soul }),
         }),
-        fetch("/api/workspace-files", {
+        operonFetch("/workspace-files", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ kind: "user", content: wsFiles.user }),
@@ -192,7 +193,7 @@ export function PersonaSettings() {
   async function deleteMemory(id: string) {
     setDeletingId(id);
     try {
-      const r = await fetch(`/api/memory?id=${id}`, { method: "DELETE" });
+      const r = await operonFetch(`/memory/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!r.ok) throw new Error("failed");
       setMemories((prev) => prev.filter((m) => m.id !== id));
       toast.success("Memory removed");

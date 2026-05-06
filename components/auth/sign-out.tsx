@@ -1,6 +1,9 @@
 "use client"
-import { signOut } from "next-auth/react"
- 
+import { useRouter } from "next/navigation"
+import { clearOperonSession } from "@/lib/operon-api"
+
 export function SignOut() {
-  return <button onClick={() => signOut()}>Sign Out</button>
+  const router = useRouter()
+
+  return <button onClick={() => { clearOperonSession(); router.push("/") }}>Sign Out</button>
 }

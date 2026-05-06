@@ -46,8 +46,6 @@ pub enum OpenAiEvent {
     TextDelta(String),
     /// A tool call has begun (we got an id + name).
     ToolCallBegin { index: usize, id: String, name: String },
-    /// More argument JSON arriving for a tool call.
-    ToolCallArgsDelta { index: usize, delta: String },
     /// Stream finished. The accumulated tool calls (if any) are returned so
     /// the runner can dispatch and loop.
     Finished {
@@ -200,12 +198,6 @@ fn parse_sse(
                                     index,
                                     id: entry.id.clone(),
                                     name: entry.function.name.clone(),
-                                };
-                            }
-                            if !arg_delta.is_empty() {
-                                yield OpenAiEvent::ToolCallArgsDelta {
-                                    index,
-                                    delta: arg_delta.to_owned(),
                                 };
                             }
                         }

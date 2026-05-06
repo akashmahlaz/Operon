@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MessageSquare, Search } from "lucide-react";
 import Link from "next/link";
+import { operonFetch } from "@/lib/operon-api";
 
 interface ConvSummary {
   _id: string;
@@ -40,7 +41,7 @@ export default function SessionsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/chat", { cache: "no-store" });
+      const res = await operonFetch("/agent/conversations");
       const data = await res.json();
       setConvs(Array.isArray(data) ? data : []);
     } catch {

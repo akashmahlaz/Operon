@@ -3,8 +3,8 @@ import { useState, useRef } from 'react';
 import Link from "next/link";
 import { ArrowRight, ChevronDown, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession } from "next-auth/react";
 import { OperonWordmark } from "@/components/brand";
+import { useOperonSession } from "@/components/ui/session-provider";
 
 /* ── Dropdown Data ── */
 const navDropdowns: Record<
@@ -81,8 +81,8 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const { data: session } = useSession()
-  const isLoggedIn = !!session?.user
+  const { user } = useOperonSession()
+  const isLoggedIn = !!user
 
   const handleMouseEnter = (label: string) => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current)

@@ -5,10 +5,10 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Loader2, ArrowRight } from "lucide-react"
 import { motion } from "framer-motion"
-import { signIn } from "next-auth/react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { OperonWordmark } from "@/components/brand"
+import { operonGoogleOAuthUrl, operonSignup } from "@/lib/operon-api"
 
 export function SignUpForm() {
   const router = useRouter()
@@ -28,28 +28,8 @@ export function SignUpForm() {
     }
     setLoading(true)
     try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error ?? "Registration failed")
-        return
-      }
-
-      // Auto sign-in after registration
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: false,
-      })
-      if (result?.error) {
-        setError("Account created but sign-in failed. Please log in manually.")
-      } else {
-        router.push("/dashboard/chat")
-      }
+      await operonSignup(name, email, password)
+      router.push("/dashboard/coding")
     } catch {
       setError("Something went wrong. Please try again.")
     } finally {
@@ -61,7 +41,7 @@ export function SignUpForm() {
     setError("")
     setLoading(true)
     try {
-      await signIn("google", { redirectTo: "/dashboard/chat" })
+      window.location.href = operonGoogleOAuthUrl()
     } catch {
       setLoading(false)
       setError("Google sign-in failed. Please try again.")

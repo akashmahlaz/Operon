@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "rust:dev": "cd operonx && cargo run",
+    "rust:check": "cd operonx && cargo check",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

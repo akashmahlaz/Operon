@@ -3,11 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { OperonWordmark } from "@/components/brand";
+import { operonGoogleOAuthUrl, operonLogin } from "@/lib/operon-api";
 
 export function LoginForm() {
   const router = useRouter();
@@ -23,18 +23,8 @@ export function LoginForm() {
     setLoading(true);
 
     try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: false,
-      });
-
-      if (result?.error) {
-        setError("Invalid email or password.");
-        return;
-      }
-
-      router.push("/dashboard/chat");
+      await operonLogin(email, password);
+      router.push("/dashboard/coding");
       router.refresh();
     } catch {
       setError("Sign-in failed. Please try again.");
@@ -47,7 +37,7 @@ export function LoginForm() {
     setError("");
     setLoading(true);
     try {
-      await signIn("google", { redirectTo: "/dashboard/chat" });
+      window.location.href = operonGoogleOAuthUrl();
     } catch {
       setLoading(false);
       setError("Google sign-in failed. Please try again.");

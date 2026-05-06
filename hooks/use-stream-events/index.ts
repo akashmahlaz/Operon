@@ -9,10 +9,11 @@ import type {
   TextDeltaEvent,
   SourceUrlEvent,
 } from "./types";
+import { operonFetch } from "@/lib/operon-api";
 
 // ---------------------------------------------------------------------------
-// SSE event shape emitted by /api/chat
-// The server sends custom NDJSON events prefixed with "event: " lines.
+// SSE event shape emitted by /api/chat and /api/coding.
+// The server sends custom JSON envelopes as SSE data frames.
 // ---------------------------------------------------------------------------
 
 type SSEEventType =
@@ -77,7 +78,8 @@ interface UseStreamEventsReturn {
 
 let _partIdCounter = 0;
 function nextId() {
-  return `part-${++_partIdCounter}-${Date.now()}`;
+  const random = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+  return `part-${++_partIdCounter}-${random}`;
 }
 
 export function useStreamEvents({
@@ -91,6 +93,7 @@ export function useStreamEvents({
     "idle" | "submitted" | "streaming" | "error"
   >("idle");
   const [error, setError] = useState<Error | null>(null);
+  const isRustAgentApi = api === "/agent/runs" || api.endsWith("/agent/runs");
 
   // The current assistant message being built (streaming in progress)
   const assistantMessageRef = useRef<StreamingMessage | null>(null);
@@ -102,6 +105,21 @@ export function useStreamEvents({
   const abortRef = useRef<AbortController | null>(null);
   // Guard against double-start
   const streamingRef = useRef(false);
+
+  function upsertAssistantMessage(
+    prev: StreamingMessage[],
+    message: StreamingMessage,
+  ): StreamingMessage[] {
+    const existingIndex = prev.findIndex((item) => item.id === message.id);
+    if (existingIndex !== -1) {
+      return [
+        ...prev.slice(0, existingIndex),
+        message,
+        ...prev.slice(existingIndex + 1),
+      ];
+    }
+    return [...prev, message];
+  }
 
   // ---------------------------------------------------------------------------
   // Parse an SSE data line into our event format
@@ -140,15 +158,7 @@ export function useStreamEvents({
       }
     }
 
-    setMessages((prev) => {
-      // Replace the last assistant message with the updated one
-      // (or append if this is the first)
-      const last = prev[prev.length - 1];
-      if (last?.role === "assistant" && !last.isComplete) {
-        return [...prev.slice(0, -1), assistantMessageRef.current!];
-      }
-      return [...prev, assistantMessageRef.current!];
-    });
+    setMessages((prev) => upsertAssistantMessage(prev, assistantMessageRef.current!));
   }
 
   // ---------------------------------------------------------------------------
@@ -172,11 +182,7 @@ export function useStreamEvents({
         toolCallsByIdRef.current.set(partial.toolCallId, parts[idx] as ToolCallEvent);
       }
       setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant" && !last.isComplete) {
-          return [...prev.slice(0, -1), { ...assistantMessageRef.current! }];
-        }
-        return prev;
+        return upsertAssistantMessage(prev, { ...assistantMessageRef.current! });
       });
     }
   }
@@ -197,11 +203,9 @@ export function useStreamEvents({
     if (lastReasoning?.type === "reasoning-delta") {
       Object.assign(lastReasoning, part);
       setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant" && !last.isComplete) {
-          return [...prev.slice(0, -1), { ...assistantMessageRef.current! }];
-        }
-        return prev;
+        return assistantMessageRef.current
+          ? upsertAssistantMessage(prev, { ...assistantMessageRef.current })
+          : prev;
       });
     } else {
       appendPart(part);
@@ -320,11 +324,7 @@ export function useStreamEvents({
           assistantMessageRef.current.isComplete = true;
           assistantMessageRef.current.isStreaming = false;
           setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role === "assistant") {
-              return [...prev.slice(0, -1), assistantMessageRef.current!];
-            }
-            return prev;
+            return upsertAssistantMessage(prev, assistantMessageRef.current!);
           });
           onFinished?.(assistantMessageRef.current);
         }
@@ -370,18 +370,50 @@ export function useStreamEvents({
       setMessages((prev) => [...prev, userMsg]);
 
       try {
-        const res = await fetch(api, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [{ role: "user", parts: [{ type: "text", text }] }],
-            conversationId: opts?.conversationId ?? conversationId ?? null,
-            modelSpec: opts?.modelSpec,
-            reasoningLevel: opts?.reasoningLevel,
-            channel: opts?.channel,
-          }),
-          signal: abortRef.current.signal,
-        });
+        const res = isRustAgentApi
+          ? await (async () => {
+              const createRes = await operonFetch("/agent/runs", {
+                method: "POST",
+                body: JSON.stringify({
+                  prompt: text,
+                  conversation_id: opts?.conversationId ?? conversationId ?? null,
+                  model: opts?.modelSpec,
+                  reasoning_level: opts?.reasoningLevel,
+                  channel: opts?.channel,
+                }),
+                signal: abortRef.current?.signal,
+              });
+              if (!createRes.ok) return createRes;
+              const created = (await createRes.json()) as {
+                run_id: string;
+                conversation_id: string;
+              };
+              const streamRes = await operonFetch(`/agent/runs/${created.run_id}/sse`, {
+                headers: { Accept: "text/event-stream" },
+                signal: abortRef.current?.signal,
+              });
+              return new Response(streamRes.body, {
+                status: streamRes.status,
+                statusText: streamRes.statusText,
+                headers: {
+                  "Content-Type": streamRes.headers.get("content-type") ?? "text/event-stream",
+                  "X-Run-Id": created.run_id,
+                  "X-Conversation-Id": created.conversation_id,
+                },
+              });
+            })()
+          : await fetch(api, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages: [{ role: "user", parts: [{ type: "text", text }] }],
+                conversationId: opts?.conversationId ?? conversationId ?? null,
+                modelSpec: opts?.modelSpec,
+                reasoningLevel: opts?.reasoningLevel,
+                channel: opts?.channel,
+              }),
+              signal: abortRef.current.signal,
+            });
 
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -436,7 +468,7 @@ export function useStreamEvents({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleEvent is defined in hook body and captures only stable refs
-    [api, conversationId, onFinished, onResponse]
+    [api, conversationId, isRustAgentApi, onFinished, onResponse]
   );
 
   // ---------------------------------------------------------------------------

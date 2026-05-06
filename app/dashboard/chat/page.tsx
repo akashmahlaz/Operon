@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo, Suspense } from "react";
-import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -49,9 +48,10 @@ import { StreamingChatMessageList } from "@/components/chat/message/streaming-me
 import { useStreamEvents } from "@/hooks/use-stream-events";
 import type { ContentPartType, StreamPart, StreamingMessage, ToolCallEvent } from "@/hooks/use-stream-events/types";
 import { isToolState } from "@/hooks/use-stream-events/types";
-import { isModelProvider, type ProviderMeta } from "@/components/dashboard/settings/provider-catalog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { operonFetch } from "@/lib/operon-api";
+import { useOperonSession } from "@/components/ui/session-provider";
 
 interface ConversationSummary {
   _id: string;
@@ -174,8 +174,8 @@ function ChatPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const urlConvId = searchParams.get("id") || undefined;
-  const { data: session } = useSession();
-  const userName = session?.user?.name?.split(" ")[0] ?? "there";
+  const { user } = useOperonSession();
+  const userName = user?.name?.split(" ")[0] ?? user?.display_name?.split(" ")[0] ?? "there";
 
   function getGreeting() {
     const h = new Date().getHours();
@@ -195,7 +195,7 @@ function ChatPage() {
     setMessages: setChatMessages,
     error: chatError,
   } = useStreamEvents({
-    api: "/api/chat",
+    api: "/agent/runs",
     conversationId: convIdRef.current ?? undefined,
   });
 
@@ -234,9 +234,8 @@ function ChatPage() {
   } | null>(null);
   const [waConnecting, setWaConnecting] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>("openai:gpt-4o-mini");
   const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("auto");
-  const [providers, setProviders] = useState<ProviderMeta[]>([]);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -246,40 +245,9 @@ function ChatPage() {
     convIdRef.current = conversationId;
   }, [conversationId]);
 
-  useEffect(() => {
-    fetch("/api/providers", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data) => {
-        setProviders(data.providers || []);
-        if (typeof data.defaultModel === "string" && data.defaultModel) {
-          setSelectedModel(data.defaultModel);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const connectedProviders = useMemo(() => providers.filter((p) => p.configured && isModelProvider(p)), [providers]);
-  const modelOptions: PromptModelOption[] = useMemo(() => connectedProviders.flatMap((provider) => {
-    // Only show models that were actually fetched from the provider's API.
-    // providers with modelsFromProfile === false still have the static catalog
-    // placeholders — hide them until real discovery succeeds.
-    if (!provider.modelsFromProfile) return [];
-    return (provider.models ?? []).map((model) => ({
-      value: `${provider.id}/${model}`,
-      label: model,
-      providerLabel: provider.name,
-    }));
-  }), [connectedProviders]);
-
-  useEffect(() => {
-    if (modelOptions.length === 0) {
-      if (selectedModel) setSelectedModel("");
-      return;
-    }
-    if (!modelOptions.some((model) => model.value === selectedModel)) {
-      setSelectedModel(modelOptions[0].value);
-    }
-  }, [modelOptions, selectedModel]);
+  const modelOptions: PromptModelOption[] = useMemo(() => [
+    { value: "openai:gpt-4o-mini", label: "gpt-4o-mini", providerLabel: "OpenAI" },
+  ], []);
 
   /** Returns true only for providers/models that actually support thinking/reasoning cost control */
   function modelSupportsReasoning(spec: string): boolean {
@@ -361,7 +329,7 @@ function ChatPage() {
 
   async function loadConversations() {
     try {
-      const res = await fetch("/api/chat", { cache: "no-store" });
+      const res = await operonFetch("/agent/conversations");
       if (res.ok) {
         const data = await res.json();
         setConversations(Array.isArray(data) ? data : []);
@@ -374,8 +342,8 @@ function ChatPage() {
   async function loadChannelStatus() {
     try {
       const [waRes, tgRes] = await Promise.all([
-        fetch("/api/whatsapp?action=status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-        fetch("/api/telegram?action=status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        operonFetch("/integrations/whatsapp/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        operonFetch("/integrations/telegram/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ]);
       setChannelStatus({
         web: true,
@@ -389,7 +357,7 @@ function ChatPage() {
 
   async function loadWaOnboarding() {
     try {
-      const res = await fetch("/api/whatsapp?action=onboarding");
+      const res = await operonFetch("/integrations/whatsapp/onboarding");
       if (!res.ok) return;
       const data = await res.json();
       setWaSettings({
@@ -417,7 +385,7 @@ function ChatPage() {
               .map((n) => n.trim().replace(/\D/g, ""))
               .filter(Boolean)
           : ["*"];
-      const res = await fetch("/api/whatsapp", {
+      const res = await operonFetch("/integrations/whatsapp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -437,7 +405,7 @@ function ChatPage() {
 
   async function loadConversation(id: string) {
     try {
-      const res = await fetch(`/api/chat?id=${encodeURIComponent(id)}`);
+      const res = await operonFetch(`/agent/conversations/${encodeURIComponent(id)}`);
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       setConversationId(data._id);
@@ -461,8 +429,8 @@ function ChatPage() {
 
   async function createConversation(): Promise<string | null> {
     try {
-      const res = await fetch("/api/chat", {
-        method: "PUT",
+      const res = await operonFetch("/agent/conversations", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "New Chat", channel: activeChannel }),
       });
@@ -483,7 +451,7 @@ function ChatPage() {
   async function deleteConversation(id: string, e: React.MouseEvent) {
     e.stopPropagation();
     try {
-      await fetch(`/api/chat?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      await operonFetch(`/agent/conversations/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (conversationId === id) router.push("/dashboard/chat");
       loadConversations();
     } catch {
@@ -516,7 +484,7 @@ function ChatPage() {
       setAttachedFiles((prev) => [...prev, entry]);
       const formData = new FormData();
       formData.append("file", file);
-      fetch("/api/upload", { method: "POST", body: formData })
+      operonFetch("/uploads", { method: "POST", body: formData })
         .then(async (res) => {
           if (!res.ok) {
             const err = await res.json().catch(() => ({ error: "Upload failed" }));
@@ -551,7 +519,7 @@ function ChatPage() {
     setWaConnecting(true);
     setChannelPanelView("whatsapp-connect");
     try {
-      const res = await fetch("/api/whatsapp", {
+      const res = await operonFetch("/integrations/whatsapp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "qr" }),
@@ -567,7 +535,7 @@ function ChatPage() {
 
   async function disconnectWhatsApp() {
     try {
-      await fetch("/api/whatsapp", {
+      await operonFetch("/integrations/whatsapp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "disconnect" }),

@@ -7,4 +7,3 @@ pub mod tools;
 pub mod types;
 
 pub use registry::AgentRegistry;
-pub use types::{AgentEvent, RunId, RunRequest, RunStatus};

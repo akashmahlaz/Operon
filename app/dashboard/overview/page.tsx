@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { operonFetch } from "@/lib/operon-api";
 
 interface UsageSummary {
   totalRequests: number;
@@ -69,9 +70,9 @@ export default function OverviewPage() {
     setLoading(true);
     try {
       const [usageRes, healthRes, logsRes] = await Promise.all([
-        fetch("/api/usage?days=7"),
-        fetch("/api/health"),
-        fetch("/api/logs?limit=5"),
+        operonFetch("/admin/usage?days=7"),
+        operonFetch("/healthz"),
+        operonFetch("/admin/logs?limit=5"),
       ]);
 
       if (usageRes.ok) {

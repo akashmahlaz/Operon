@@ -1,8 +1,18 @@
 
 "use client"
 
-import { signIn } from "next-auth/react"
- 
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { operonGoogleOAuthUrl } from "@/lib/operon-api"
+
 export default function SignIn() {
-  return <button onClick={() => signIn("google" , { redirectTo: "/dashboard/chat" } ) }>Sign in</button>
+  const router = useRouter()
+
+  // If already authenticated, redirect to dashboard
+  useEffect(() => {
+    const token = localStorage.getItem("operon_token")
+    if (token) router.replace("/dashboard/chat")
+  }, [router])
+
+  return <button onClick={() => { window.location.href = operonGoogleOAuthUrl() }}>Sign in</button>
 }

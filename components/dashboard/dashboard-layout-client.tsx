@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { signOut } from "next-auth/react";
 import { LogOut, Settings, ChevronRight } from "lucide-react";
 import {
   Tooltip,
@@ -26,15 +25,19 @@ import {
 } from "@/components/dashboard/dashboard-sections";
 import { OperonMark } from "@/components/brand";
 import { cn } from "@/lib/utils";
+import { useOperonSession } from "@/components/ui/session-provider";
+import { clearOperonSession } from "@/lib/operon-api";
 
 interface DashboardLayoutClientProps {
   user?: { name?: string | null; email?: string | null; image?: string | null };
   children: React.ReactNode;
 }
 
-export function DashboardLayoutClient({ user, children }: DashboardLayoutClientProps) {
+export function DashboardLayoutClient({ user: initialUser, children }: DashboardLayoutClientProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const session = useOperonSession();
+  const user = session.user ?? initialUser;
   const [expanded, setExpanded] = useState(false);
   const SettingsIcon = settingsDashboardSection.icon;
 
@@ -180,10 +183,7 @@ export function DashboardLayoutClient({ user, children }: DashboardLayoutClientP
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="gap-2 text-destructive focus:text-destructive"
-                  onClick={async () => {
-                    await signOut();
-                    router.push("/");
-                  }}
+                  onClick={() => { clearOperonSession(); router.push("/"); }}
                 >
                   <LogOut className="size-3.5" /> Sign out
                 </DropdownMenuItem>

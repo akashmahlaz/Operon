@@ -28,14 +28,15 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { OperonMark } from "@/components/brand";
+import { useOperonSession } from "@/components/ui/session-provider";
+import { clearOperonSession } from "@/lib/operon-api";
 import { dashboardNav } from "@/lib/nav";
 import type { ConversationSummary } from "@/lib/types";
 import { Plus, Search, LogOut, Settings, User, MoreHorizontal, Trash2, Clock } from "lucide-react";
-import { signOut } from "next-auth/react";
 
 interface AppSidebarProps {
   conversations?: ConversationSummary[];
-  user?: { name?: string | null; email?: string | null; image?: string | null };
+  user?: { name?: string | null; email?: string | null; image?: string | null; display_name?: string | null };
 }
 
 const groupLabels: Record<string, string> = {
@@ -46,6 +47,8 @@ const groupLabels: Record<string, string> = {
 
 export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
   const pathname = usePathname();
+  const session = useOperonSession();
+  const currentUser = session.user ?? user;
   const [query, setQuery] = React.useState("");
 
   const filteredConversations = React.useMemo(() => {
@@ -54,9 +57,9 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
     return conversations.filter((c) => c.title.toLowerCase().includes(q));
   }, [conversations, query]);
 
-  const initials = (user?.name ?? user?.email ?? "U")
+  const initials = (currentUser?.name ?? currentUser?.display_name ?? currentUser?.email ?? "U")
     .split(/\s+/)
-    .map((p) => p[0])
+    .map((p: string) => p[0])
     .join("")
     .slice(0, 2)
     .toUpperCase();
@@ -170,9 +173,9 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate text-[13px] font-medium">{user?.name ?? "Guest"}</span>
+                    <span className="truncate text-[13px] font-medium">{currentUser?.name ?? currentUser?.display_name ?? "Guest"}</span>
                     <span className="truncate text-[11px] text-muted-foreground">
-                      {user?.email ?? "Sign in to sync"}
+                      {currentUser?.email ?? "Sign in to sync"}
                     </span>
                   </div>
                   <MoreHorizontal className="ml-auto h-4 w-4 text-muted-foreground group-data-[collapsible=icon]:hidden" />
@@ -194,7 +197,7 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
-                  onSelect={() => signOut({ callbackUrl: "/" })}
+                  onSelect={() => { clearOperonSession(); window.location.href = "/"; }}
                 >
                   <LogOut className="mr-2 h-3.5 w-3.5" /> Log out
                 </DropdownMenuItem>

@@ -3,18 +3,6 @@
 
 use serde_json::{Value, json};
 
-pub fn reasoning_start() -> Value {
-    json!({ "type": "reasoning-start", "data": {} })
-}
-
-pub fn reasoning_delta(text: &str) -> Value {
-    json!({ "type": "reasoning-delta", "data": { "text": text } })
-}
-
-pub fn reasoning_end() -> Value {
-    json!({ "type": "reasoning-end", "data": {} })
-}
-
 pub fn text_delta(text: &str) -> Value {
     json!({ "type": "text-delta", "data": { "text": text } })
 }
@@ -27,13 +15,6 @@ pub fn tool_call_start(tool_call_id: &str, tool_name: &str) -> Value {
     json!({
         "type": "tool-call-start",
         "data": { "toolCallId": tool_call_id, "toolName": tool_name }
-    })
-}
-
-pub fn tool_call_input_streaming(tool_call_id: &str, args: &Value) -> Value {
-    json!({
-        "type": "tool-call-input-streaming",
-        "data": { "toolCallId": tool_call_id, "args": args }
     })
 }
 

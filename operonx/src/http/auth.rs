@@ -1,12 +1,33 @@
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
     Json,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, header},
+    response::Redirect,
 };
 use base64ct::{Base64UrlUnpadded, Encoding};
 use chrono::{Duration, Utc};
 use hmac::{Hmac, Mac};
+use oauth2::{
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
+    EndpointNotSet, EndpointSet,
+    RedirectUrl, Scope,
+    TokenResponse, TokenUrl, basic::BasicClient,
+};
+use oauth2::reqwest;
+
+type GoogleClient = oauth2::Client<
+    oauth2::basic::BasicErrorResponse,
+    oauth2::basic::BasicTokenResponse,
+    oauth2::basic::BasicTokenIntrospectionResponse,
+    oauth2::StandardRevocableToken,
+    oauth2::basic::BasicRevocationErrorResponse,
+    EndpointSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointSet,
+>;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -48,6 +69,20 @@ pub struct UserResponse {
     id: Uuid,
     email: String,
     display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct OAuthCallbackQuery {
+    code: String,
+    #[serde(default)]
+    state: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GoogleUserInfo {
+    email: String,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -124,6 +159,54 @@ pub async fn logout() -> AppResult<(HeaderMap, Json<serde_json::Value>)> {
     Ok((headers, Json(serde_json::json!({ "ok": true }))))
 }
 
+pub async fn google_oauth_start(State(state): State<AppState>) -> AppResult<Redirect> {
+    let client = google_oauth_client(&state)?;
+    let (auth_url, _csrf_token) = client
+        .authorize_url(CsrfToken::new_random)
+        .add_scope(Scope::new("openid".to_owned()))
+        .add_scope(Scope::new("email".to_owned()))
+        .add_scope(Scope::new("profile".to_owned()))
+        .url();
+    Ok(Redirect::temporary(auth_url.as_str()))
+}
+
+pub async fn google_oauth_callback(
+    State(state): State<AppState>,
+    Query(query): Query<OAuthCallbackQuery>,
+) -> AppResult<Redirect> {
+    let client = google_oauth_client(&state)?;
+    let http_client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| AppError::Internal)?;
+    let token = client
+        .exchange_code(AuthorizationCode::new(query.code))
+        .request_async(&http_client)
+        .await
+        .map_err(|err| AppError::ServiceUnavailable(format!("google oauth: {err}")))?;
+    let access_token = token.access_token().secret();
+    let profile = reqwest::Client::new()
+        .get("https://openidconnect.googleapis.com/v1/userinfo")
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|err| AppError::ServiceUnavailable(format!("google userinfo: {err}")))?
+        .json::<GoogleUserInfo>()
+        .await
+        .map_err(|err| AppError::ServiceUnavailable(format!("google profile: {err}")))?;
+
+    validate_email(&profile.email)?;
+    let user = upsert_external_user(&state, &profile.email, profile.name.as_deref()).await?;
+    let auth = issue_bearer_token(&state, user)?;
+    let callback = format!(
+        "{}/auth/callback?token={}&expires_at={}",
+        state.config.web_origin.trim_end_matches('/'),
+        auth.access_token,
+        auth.expires_at
+    );
+    Ok(Redirect::temporary(&callback))
+}
+
 #[derive(Deserialize)]
 pub struct InternalExchangeRequest {
     pub email: String,
@@ -174,20 +257,50 @@ pub async fn internal_exchange(
     .await?;
 
     let user = user_from_row(row)?;
-    let now = Utc::now();
-    let expires_at = now + Duration::seconds(state.config.access_token_ttl_seconds);
-    let claims = Claims {
-        sub: user.id,
-        email: user.email.clone(),
-        iat: now.timestamp() as usize,
-        exp: expires_at.timestamp() as usize,
-    };
-    let token = encode_claims(&state.config.jwt_secret, &claims)?;
-    Ok(Json(AuthResponse {
-        user: user_response(user),
-        access_token: token,
-        expires_at: expires_at.timestamp(),
-    }))
+    Ok(Json(issue_bearer_token(&state, user)?))
+}
+
+fn google_oauth_client(state: &AppState) -> AppResult<GoogleClient> {
+    let client_id = state
+        .config
+        .google_client_id
+        .clone()
+        .ok_or_else(|| AppError::ServiceUnavailable("GOOGLE_CLIENT_ID not configured".into()))?;
+    let client_secret = state
+        .config
+        .google_client_secret
+        .clone()
+        .ok_or_else(|| AppError::ServiceUnavailable("GOOGLE_CLIENT_SECRET not configured".into()))?;
+    let redirect = format!(
+        "{}/auth/oauth/google/callback",
+        state.config.oauth_redirect_base.trim_end_matches('/')
+    );
+    let redirect_url = RedirectUrl::new(redirect).map_err(|_| AppError::Internal)?;
+    Ok(BasicClient::new(ClientId::new(client_id))
+        .set_client_secret(ClientSecret::new(client_secret))
+        .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_owned()).map_err(|_| AppError::Internal)?)
+        .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_owned()).map_err(|_| AppError::Internal)?)
+        .set_redirect_uri(redirect_url))
+}
+
+async fn upsert_external_user(
+    state: &AppState,
+    email: &str,
+    display_name: Option<&str>,
+) -> AppResult<UserRecord> {
+    let row = sqlx::query(
+        "insert into users (id, email, display_name) values ($1, lower($2), $3)
+             on conflict (email) do update
+                 set display_name = coalesce(excluded.display_name, users.display_name),
+                     updated_at = now()
+             returning id, email, display_name, password_hash",
+    )
+    .bind(Uuid::now_v7())
+    .bind(email.trim())
+    .bind(display_name.map(str::trim).filter(|value| !value.is_empty()))
+    .fetch_one(&state.db)
+    .await?;
+    user_from_row(row)
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -304,6 +417,23 @@ fn issue_auth_response(
             expires_at: expires_at.timestamp(),
         }),
     ))
+}
+
+fn issue_bearer_token(state: &AppState, user: UserRecord) -> AppResult<AuthResponse> {
+    let now = Utc::now();
+    let expires_at = now + Duration::seconds(state.config.access_token_ttl_seconds);
+    let claims = Claims {
+        sub: user.id,
+        email: user.email.clone(),
+        iat: now.timestamp() as usize,
+        exp: expires_at.timestamp() as usize,
+    };
+    let token = encode_claims(&state.config.jwt_secret, &claims)?;
+    Ok(AuthResponse {
+        user: user_response(user),
+        access_token: token,
+        expires_at: expires_at.timestamp(),
+    })
 }
 
 fn user_response(user: UserRecord) -> UserResponse {

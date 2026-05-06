@@ -13,7 +13,7 @@ use std::time::Duration;
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{
         IntoResponse, Response,
         sse::{Event, KeepAlive, Sse},
@@ -65,6 +65,12 @@ pub async fn create_run(
     if prompt.is_empty() {
         return Err(AppError::BadRequest("prompt is required".into()));
     }
+    let channel = payload
+        .channel
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("coding");
 
     let conversation_id = match payload.conversation_id {
         Some(id) => {
@@ -88,11 +94,12 @@ pub async fn create_run(
         None => {
             let id = Uuid::now_v7();
             sqlx::query(
-                "insert into conversations (id, user_id, title, channel) values ($1, $2, $3, 'coding')",
+                "insert into conversations (id, user_id, title, channel) values ($1, $2, $3, $4)",
             )
             .bind(id)
             .bind(user_id)
             .bind(truncate_title(prompt))
+            .bind(channel)
             .execute(&state.db)
             .await?;
             id
@@ -118,7 +125,7 @@ pub async fn create_run(
     .bind(conversation_id)
     .bind(user_id)
     .bind(prompt)
-    .bind(json!({ "role": "user", "content": prompt }))
+    .bind(json!([{ "type": "text-delta", "text": prompt }, { "type": "text-end", "text": "" }]))
     .execute(&state.db)
     .await?;
 

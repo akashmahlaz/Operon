@@ -457,7 +457,7 @@ mod patch {
     enum HunkLine {
         Context(String),
         Add(String),
-        Remove(String),
+        Remove,
     }
 
     fn parse(diff: &str) -> Result<Vec<FileDiff>> {
@@ -504,7 +504,8 @@ mod patch {
                 if let Some(rest) = line.strip_prefix('+') {
                     h.lines.push(HunkLine::Add(rest.to_owned()));
                 } else if let Some(rest) = line.strip_prefix('-') {
-                    h.lines.push(HunkLine::Remove(rest.to_owned()));
+                    let _ = rest;
+                    h.lines.push(HunkLine::Remove);
                 } else if let Some(rest) = line.strip_prefix(' ') {
                     h.lines.push(HunkLine::Context(rest.to_owned()));
                 } else if line.is_empty() {
@@ -614,7 +615,7 @@ mod patch {
                             output.push(format!("{text}\n"));
                         }
                     }
-                    HunkLine::Remove(_) => {
+                    HunkLine::Remove => {
                         if cursor < original_lines.len() {
                             cursor += 1;
                         }
