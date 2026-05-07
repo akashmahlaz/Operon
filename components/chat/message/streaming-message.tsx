@@ -112,7 +112,7 @@ function ToolIcon({
 // ToolCallItem — Copilot-style: invocationMessage during, pastTenseMessage after,
 // collapsible to reveal args + result.
 // ---------------------------------------------------------------------------
-function ToolCallItem({ event }: { event: ToolCallEvent }) {
+function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev: ToolCallEvent) => void }) {
   const [open, setOpen] = useState(false);
   const isPending = ["calling", "input-streaming", "input-available", "executing"].includes(
     event.state
@@ -211,8 +211,25 @@ function ToolCallItem({ event }: { event: ToolCallEvent }) {
           )}
           {event.errorText && (
             <div className="mb-1">
-              <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-destructive/80">
-                Error
+              <div className="mb-0.5 flex items-center justify-between">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-destructive/80">
+                  Error
+                </span>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRetry(event);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10"
+                  >
+                    <svg viewBox="0 0 16 16" className="size-2.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <path d="M2 8a6 6 0 1 0 1.76-4.24M2 3v3.5h3.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Retry
+                  </button>
+                )}
               </div>
               <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-destructive">
                 {event.errorText}
@@ -390,7 +407,7 @@ function UsageBadge({ ev }: { ev: UsageEvent }) {
 // ---------------------------------------------------------------------------
 // ToolCallList — renders all tool calls in a left-bordered list
 // ---------------------------------------------------------------------------
-function ToolCallList({ events }: { events: ToolCallEvent[] }) {
+function ToolCallList({ events, onRetry }: { events: ToolCallEvent[]; onRetry?: (ev: ToolCallEvent) => void }) {
   if (!events.length) return null;
   return (
     <div className="relative ml-0.5 border-l border-border/70 pl-3">
@@ -399,7 +416,7 @@ function ToolCallList({ events }: { events: ToolCallEvent[] }) {
           <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
             <Circle className="size-1.5 fill-background text-border" />
           </span>
-          <ToolCallItem event={ev} />
+          <ToolCallItem event={ev} onRetry={onRetry} />
         </div>
       ))}
     </div>
@@ -748,10 +765,14 @@ function StreamingAssistantMessage({
   message,
   isLoading,
   onRegenerate,
+  onConfirm,
+  onRetryTool,
 }: {
   message: StreamingMessage;
   isLoading: boolean;
   onRegenerate?: () => void;
+  onConfirm?: (id: string, choice: string) => void;
+  onRetryTool?: (ev: ToolCallEvent) => void;
 }) {
   const isStreamingThis = isLoading && !message.isComplete;
   const segments = buildSegments(message.orderedParts);
@@ -799,7 +820,7 @@ function StreamingAssistantMessage({
             );
           }
           if (seg.kind === "tools") {
-            return <ToolCallList key={i} events={seg.tools} />;
+            return <ToolCallList key={i} events={seg.tools} onRetry={onRetryTool} />;
           }
           if (seg.kind === "text") {
             const text = seg.events.map((e) => e.text).join("");
@@ -829,7 +850,7 @@ function StreamingAssistantMessage({
             return <TextEditCard key={i} ev={seg.ev} />;
           }
           if (seg.kind === "confirmation") {
-            return <ConfirmationCard key={i} ev={seg.ev} />;
+            return <ConfirmationCard key={i} ev={seg.ev} onResolve={onConfirm} />;
           }
           if (seg.kind === "command-button") {
             return <CommandButton key={i} ev={seg.ev} />;
@@ -844,6 +865,9 @@ function StreamingAssistantMessage({
         {allText && !isStreamingThis && (
           <MessageToolbar text={allText} onRegenerate={onRegenerate} />
         )}
+
+        {/* Used references (Copilot-parity) — collapsible at bottom of message */}
+        {!isStreamingThis && <UsedReferencesSection segments={segments} />}
       </div>
     </div>
   );
@@ -892,9 +916,15 @@ function MessageToolbar({
 function ChatMessageRow({
   message,
   isLoading,
+  onConfirm,
+  onRetryTool,
+  onRegenerate,
 }: {
   message: StreamingMessage;
   isLoading: boolean;
+  onConfirm?: (id: string, choice: string) => void;
+  onRetryTool?: (ev: ToolCallEvent) => void;
+  onRegenerate?: () => void;
 }) {
   if (message.role === "user") {
     const text = message.orderedParts
@@ -904,7 +934,13 @@ function ChatMessageRow({
     return <UserMessage text={text} />;
   }
   return (
-    <StreamingAssistantMessage message={message} isLoading={isLoading} />
+    <StreamingAssistantMessage
+      message={message}
+      isLoading={isLoading}
+      onConfirm={onConfirm}
+      onRetryTool={onRetryTool}
+      onRegenerate={onRegenerate}
+    />
   );
 }
 
@@ -914,19 +950,97 @@ function ChatMessageRow({
 export function StreamingChatMessageList({
   messages,
   isLoading,
+  onConfirm,
+  onRetryTool,
+  onRegenerate,
 }: {
   messages: StreamingMessage[];
   isLoading: boolean;
+  onConfirm?: (id: string, choice: string) => void;
+  onRetryTool?: (ev: ToolCallEvent) => void;
+  onRegenerate?: () => void;
 }) {
   return (
     <div className="flex flex-col gap-1 pb-4">
-      {messages.map((message) => (
+      {messages.map((message, idx) => (
         <ChatMessageRow
           key={message.id}
           message={message}
           isLoading={isLoading}
+          onConfirm={onConfirm}
+          onRetryTool={onRetryTool}
+          onRegenerate={
+            // Only the most recent assistant message gets regenerate
+            idx === messages.length - 1 && message.role === "assistant" ? onRegenerate : undefined
+          }
         />
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// UsedReferencesSection — Copilot-style "Used N references" collapsible
+// ---------------------------------------------------------------------------
+function UsedReferencesSection({ segments }: { segments: RenderSegment[] }) {
+  const [open, setOpen] = useState(false);
+
+  // Collect everything that counts as a "reference used" by the agent.
+  type UsedRef = { kind: string; label: string; uri?: string };
+  const refs: UsedRef[] = [];
+  for (const s of segments) {
+    if (s.kind === "references") {
+      for (const r of s.refs) refs.push({ kind: "reference", label: r.title ?? r.uri, uri: r.uri });
+    } else if (s.kind === "anchor") {
+      refs.push({ kind: "anchor", label: s.ev.title ?? s.ev.uri, uri: s.ev.uri });
+    } else if (s.kind === "sources") {
+      for (const u of s.urls) refs.push({ kind: "source", label: u.title ?? u.url, uri: u.url });
+    } else if (s.kind === "tools") {
+      for (const t of s.tools) {
+        const args = t.args as Record<string, unknown> | undefined;
+        const uri = args && typeof args.path === "string" ? args.path : undefined;
+        if (uri) refs.push({ kind: "tool", label: uri, uri });
+      }
+    }
+  }
+
+  // De-dup by uri+label
+  const seen = new Set<string>();
+  const unique = refs.filter((r) => {
+    const key = `${r.uri ?? r.label}|${r.kind}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (unique.length === 0) return null;
+
+  return (
+    <div className="mt-2 text-[12px]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 text-muted-foreground/70 hover:text-muted-foreground"
+      >
+        <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
+        <span>
+          Used {unique.length} {unique.length === 1 ? "reference" : "references"}
+        </span>
+      </button>
+      {open && (
+        <ul className="mt-1.5 space-y-1 border-l border-border/60 pl-3">
+          {unique.map((r, i) => (
+            <li key={i} className="flex items-center gap-1.5 truncate font-mono text-[11px] text-muted-foreground/75">
+              <FileText className="size-2.5 shrink-0" />
+              {r.uri ? (
+                <a href={r.uri} className="truncate hover:text-foreground">{r.label}</a>
+              ) : (
+                <span className="truncate">{r.label}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

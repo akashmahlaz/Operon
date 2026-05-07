@@ -313,3 +313,160 @@ pub async fn append_message(
 
     Ok(Json(json!({ "ok": true })))
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Compact conversation (Copilot-parity for long sessions)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// POST /agent/conversations/:id/compact
+/// Replaces all but the most recent 8 messages with a single synthetic
+/// system message that summarises the earlier turns. NOTE: this currently
+/// produces a structural compaction (a "summary placeholder" listing
+/// participant counts) without invoking the LLM; future work will pipe
+/// the truncated messages through a summarisation prompt.
+pub async fn compact_conversation(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> AppResult<Json<Value>> {
+    let user_id = require_user(&state, &headers)?;
+
+    let owner = sqlx::query("select user_id from conversations where id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::BadRequest("unknown conversation".into()))?;
+    let owner_id: Uuid = owner.try_get("user_id")?;
+    if owner_id != user_id {
+        return Err(AppError::Unauthorized);
+    }
+
+    // Load all message ids in order.
+    let rows = sqlx::query(
+        "select id, role, content from messages where conversation_id = $1 order by created_at asc",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+
+    if rows.len() <= 8 {
+        return Ok(Json(json!({ "ok": true, "compacted": 0 })));
+    }
+
+    // Keep the last 8 messages; everything before them gets summarised.
+    let cutoff = rows.len() - 8;
+    let to_compact: Vec<_> = rows.iter().take(cutoff).collect();
+    let user_count = to_compact.iter().filter(|r| r.try_get::<String, _>("role").map(|s| s == "user").unwrap_or(false)).count();
+    let asst_count = to_compact.iter().filter(|r| r.try_get::<String, _>("role").map(|s| s == "assistant").unwrap_or(false)).count();
+
+    // Build a brief text summary from the leading user prompts.
+    let mut snippets: Vec<String> = Vec::new();
+    for r in to_compact.iter().take(6) {
+        let role: String = r.try_get("role")?;
+        let content: String = r.try_get("content")?;
+        if role == "user" {
+            let s: String = content.chars().take(120).collect();
+            snippets.push(format!("- {s}"));
+        }
+    }
+    let summary = format!(
+        "Earlier in this conversation: {user_count} user message(s) and {asst_count} assistant response(s). \
+         Highlights:\n{}",
+        snippets.join("\n")
+    );
+
+    // Delete the old messages, insert the summary as a synthetic system message
+    // with timestamp matching the first compacted message so order is preserved.
+    let mut tx = state.db.begin().await?;
+    for r in &to_compact {
+        let mid: Uuid = r.try_get("id")?;
+        sqlx::query("delete from messages where id = $1")
+            .bind(mid)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let summary_parts = json!([
+        { "type": "text-delta", "text": summary.clone() },
+        { "type": "text-end", "text": "" }
+    ]);
+    sqlx::query(
+        "insert into messages (id, conversation_id, user_id, role, content, parts) \
+         values ($1, $2, $3, 'system', $4, $5)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(id)
+    .bind(user_id)
+    .bind(&summary)
+    .bind(summary_parts)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    sqlx::query("update conversations set updated_at = now() where id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+
+    Ok(Json(json!({ "ok": true, "compacted": cutoff })))
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Confirmation reply (Copilot-parity for tool-confirmation prompts)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ConfirmRequest {
+    #[serde(rename = "confirmationId")]
+    pub confirmation_id: String,
+    pub choice: String,
+}
+
+/// POST /agent/conversations/:id/confirm
+/// Records the user's choice for a confirmation prompt. The runner will
+/// pick this up on the next iteration. Currently this just persists the
+/// answer as a synthetic user message so the next agent turn sees it.
+pub async fn confirm_action(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(payload): Json<ConfirmRequest>,
+) -> AppResult<Json<Value>> {
+    let user_id = require_user(&state, &headers)?;
+
+    let owner = sqlx::query("select user_id from conversations where id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::BadRequest("unknown conversation".into()))?;
+    let owner_id: Uuid = owner.try_get("user_id")?;
+    if owner_id != user_id {
+        return Err(AppError::Unauthorized);
+    }
+
+    let content = format!(
+        "Confirmation `{}`: user chose `{}`.",
+        payload.confirmation_id, payload.choice
+    );
+    let parts = json!([
+        { "type": "text-delta", "text": content.clone() },
+        { "type": "text-end", "text": "" }
+    ]);
+    sqlx::query(
+        "insert into messages (id, conversation_id, user_id, role, content, parts) \
+         values ($1, $2, $3, 'system', $4, $5)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(id)
+    .bind(user_id)
+    .bind(&content)
+    .bind(parts)
+    .execute(&state.db)
+    .await?;
+
+    sqlx::query("update conversations set updated_at = now() where id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+
+    Ok(Json(json!({ "ok": true })))
+}

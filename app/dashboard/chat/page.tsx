@@ -1264,6 +1264,28 @@ function ChatPage() {
             <StreamingChatMessageList
               messages={chatMessages as StreamingMessage[]}
               isLoading={isLoading}
+              onConfirm={(id, choice) => {
+                if (!conversationId) return;
+                operonFetch(`/agent/conversations/${conversationId}/confirm`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ confirmationId: id, choice }),
+                }).catch(() => toast.error("Failed to send confirmation"));
+              }}
+              onRetryTool={(ev) => {
+                // Re-issue the tool by asking the agent to retry.
+                handleSend(`Please retry the previous \`${ev.toolName}\` call.`);
+              }}
+              onRegenerate={() => {
+                // Find the last user message and re-send it.
+                const lastUser = [...chatMessages].reverse().find((m) => m.role === "user");
+                if (!lastUser) return;
+                const text = lastUser.orderedParts
+                  .filter((p) => p.type === "text-delta")
+                  .map((p) => (p as { text?: string }).text ?? "")
+                  .join("");
+                if (text.trim()) handleSend(text);
+              }}
             />
 
             <div ref={messagesEndRef} className="h-px" aria-hidden="true" />
@@ -1293,6 +1315,12 @@ function ChatPage() {
         {/* ─── Input ───── */}
         <div className="shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-3 pt-2">
           <div className="relative mx-auto max-w-3xl">
+            {/* Token usage + Compact (Copilot-parity for long sessions) */}
+            <ConversationStatusBar
+              messages={chatMessages as StreamingMessage[]}
+              conversationId={conversationId}
+              onCompacted={() => loadConversations()}
+            />
             <div className="relative flex flex-col rounded-2xl border border-border bg-card shadow-sm transition-all duration-200 focus-within:border-primary/30 focus-within:shadow-md">
               {attachedFiles.length > 0 && (
                 <div className="flex flex-wrap gap-2 px-4 pb-2 pt-4">
@@ -1373,6 +1401,88 @@ function ChatPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// ConversationStatusBar — Copilot-parity: shows latest token usage and a
+// "Compact conversation" button to summarize old turns when the context is
+// getting long.
+// ──────────────────────────────────────────────────────────────────────────
+function ConversationStatusBar({
+  messages,
+  conversationId,
+  onCompacted,
+}: {
+  messages: StreamingMessage[];
+  conversationId: string | null;
+  onCompacted?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  // Find the most recent usage event across all messages.
+  const usage = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      for (let j = m.orderedParts.length - 1; j >= 0; j--) {
+        const p = m.orderedParts[j] as { type?: string; totalTokens?: number; promptTokens?: number; completionTokens?: number };
+        if (p?.type === "usage" && typeof p.totalTokens === "number") return p;
+      }
+    }
+    return null;
+  })();
+
+  const totalMsgs = messages.length;
+  // Heuristic compaction trigger: > 30 messages OR > ~80% of a 128k window.
+  const ctxWindow = 128_000;
+  const used = usage?.totalTokens ?? 0;
+  const pct = Math.min(1, used / ctxWindow);
+  const shouldNudge = totalMsgs > 30 || pct > 0.8;
+
+  if (!conversationId || (totalMsgs < 6 && !usage)) return null;
+
+  async function compact() {
+    if (!conversationId) return;
+    setBusy(true);
+    try {
+      const res = await operonFetch(`/agent/conversations/${conversationId}/compact`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(`compact failed (${res.status})`);
+      toast.success("Conversation compacted");
+      onCompacted?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Compact failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mb-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground/70">
+      <div className="flex items-center gap-2">
+        {usage && (
+          <span className="font-mono">
+            {used.toLocaleString()} tok · {Math.round(pct * 100)}% of {Math.round(ctxWindow / 1000)}k
+          </span>
+        )}
+        {shouldNudge && (
+          <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600">
+            context filling up
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={compact}
+        className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-0.5 text-[11px] hover:bg-muted disabled:opacity-50"
+        title="Summarize earlier turns to free up context"
+      >
+        {busy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+        Compact
+      </button>
     </div>
   );
 }

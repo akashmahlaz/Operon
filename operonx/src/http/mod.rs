@@ -39,6 +39,8 @@ pub fn router(state: AppState) -> Router {
         .route("/agent/conversations", get(conversations::list_conversations).post(conversations::create_conversation))
         .route("/agent/conversations/{id}", get(conversations::get_conversation).patch(conversations::update_conversation).delete(conversations::delete_conversation))
         .route("/agent/conversations/{id}/messages", post(conversations::append_message))
+        .route("/agent/conversations/{id}/compact", post(conversations::compact_conversation))
+        .route("/agent/conversations/{id}/confirm", post(conversations::confirm_action))
         .route("/integrations/whatsapp/status", get(integrations::whatsapp_status))
         .route("/integrations/telegram/status", get(integrations::telegram_status))
         .route("/integrations/whatsapp/onboarding", get(integrations::whatsapp_onboarding))
