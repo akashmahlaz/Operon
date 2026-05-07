@@ -57,10 +57,12 @@ pub enum OpenAiEvent {
 pub async fn stream_chat(
     client: &Client,
     api_key: &str,
+    base_url: &str,
     model: &str,
     messages: &[ChatMessage],
     tools: &[Value],
 ) -> Result<impl Stream<Item = Result<OpenAiEvent>> + use<>> {
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let body = serde_json::json!({
         "model": model,
         "stream": true,
@@ -70,13 +72,13 @@ pub async fn stream_chat(
     });
 
     let response = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(&url)
         .bearer_auth(api_key)
         .header("content-type", "application/json")
         .json(&body)
         .send()
         .await
-        .context("sending OpenAI request")?;
+        .context("sending chat completions request")?;
 
     let status = response.status();
     if !status.is_success() {

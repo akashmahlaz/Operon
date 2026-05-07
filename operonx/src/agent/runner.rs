@@ -154,6 +154,7 @@ pub struct RunnerSpec {
     pub conversation_id: Uuid,
     pub model: String,
     pub openai_api_key: String,
+    pub base_url: String,
     pub workspace: Workspace,
     pub initial_user_message: String,
     pub db: Pool<Postgres>,
@@ -224,6 +225,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         let stream = openai::stream_chat(
             &client,
             &spec.openai_api_key,
+            &spec.base_url,
             &spec.model,
             &messages,
             &tool_definitions,

@@ -50,16 +50,47 @@ pub async fn create_run(
 ) -> AppResult<Json<CreateRunResponse>> {
     let user_id = require_user(&state, &headers)?;
 
-    let api_key = state
-        .config
-        .openai_api_key
-        .clone()
-        .ok_or_else(|| AppError::ServiceUnavailable("OPENAI_API_KEY not configured".into()))?;
-
-    let model = payload
+    let model_full = payload
         .model
         .clone()
         .unwrap_or_else(|| state.config.default_agent_model.clone());
+
+    // Split "provider/model-id" → (provider, model_id_only).
+    // If there's no slash the entire string is treated as an OpenAI model.
+    let (provider, model_id) = if let Some(slash) = model_full.find('/') {
+        let p = model_full[..slash].to_owned();
+        let m = model_full[slash + 1..].to_owned();
+        (p, m)
+    } else {
+        ("openai".to_owned(), model_full.clone())
+    };
+
+    // Resolve API key: prefer stored profile key, fall back to env OPENAI_API_KEY.
+    let api_key: String = {
+        use sqlx::Row;
+        let row = sqlx::query(
+            "select api_key_ciphertext from provider_profiles where user_id = $1 and provider = $2",
+        )
+        .bind(user_id)
+        .bind(&provider)
+        .fetch_optional(&state.db)
+        .await?;
+
+        if let Some(r) = row {
+            r.try_get::<Option<String>, _>("api_key_ciphertext")?
+                .filter(|k| !k.is_empty())
+                .or_else(|| state.config.openai_api_key.clone())
+                .ok_or_else(|| AppError::ServiceUnavailable(format!("no API key for provider '{provider}'")))?
+        } else {
+            state
+                .config
+                .openai_api_key
+                .clone()
+                .ok_or_else(|| AppError::ServiceUnavailable(format!("no API key for provider '{provider}'")))?
+        }
+    };
+
+    let base_url = provider_base_url(&provider).to_owned();
 
     let prompt = payload.prompt.trim();
     if prompt.is_empty() {
@@ -113,7 +144,7 @@ pub async fn create_run(
     .bind(run_id)
     .bind(conversation_id)
     .bind(user_id)
-    .bind(&model)
+    .bind(&model_full)
     .execute(&state.db)
     .await?;
 
@@ -137,8 +168,9 @@ pub async fn create_run(
         run_id,
         user_id,
         conversation_id,
-        model: model.clone(),
+        model: model_id,
         openai_api_key: api_key,
+        base_url,
         workspace,
         initial_user_message: prompt.to_owned(),
         db: state.db.clone(),
@@ -150,8 +182,23 @@ pub async fn create_run(
         run_id,
         conversation_id,
         status: RunStatus::Running.as_str(),
-        model,
+        model: model_full,
     }))
+}
+
+fn provider_base_url(provider: &str) -> &'static str {
+    match provider {
+        "openrouter" => "https://openrouter.ai/api/v1",
+        "groq"       => "https://api.groq.com/openai/v1",
+        "deepseek"   => "https://api.deepseek.com/v1",
+        "xai"        => "https://api.x.ai/v1",
+        "mistral"    => "https://api.mistral.ai/v1",
+        "github"     => "https://models.inference.ai.azure.com",
+        "minimax"    => "https://api.minimax.io/v1",
+        "anthropic"  => "https://api.anthropic.com/v1",
+        "google"     => "https://generativelanguage.googleapis.com/v1beta/openai",
+        _            => "https://api.openai.com/v1",
+    }
 }
 
 #[derive(Deserialize, Default)]
