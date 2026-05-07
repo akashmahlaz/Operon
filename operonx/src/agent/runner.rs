@@ -32,7 +32,7 @@ use uuid::Uuid;
 use super::{
     events,
     openai::{self, ChatMessage, OpenAiEvent, ToolCall, ToolCallFunction},
-    prompt::CODING_SYSTEM_PROMPT,
+    prompt::{CODING_SYSTEM_PROMPT, build_system_message},
     tools::{self, Workspace},
     types::{AgentEvent, RunId, RunStatus},
 };
@@ -148,11 +148,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
     let mut messages: Vec<ChatMessage> = Vec::new();
     messages.push(ChatMessage {
         role: "system".to_owned(),
-        content: Some(format!(
-            "{}\n\nWorkspace root: {}",
-            CODING_SYSTEM_PROMPT,
-            spec.workspace.root().display()
-        )),
+        content: Some(build_system_message(&spec.workspace)),
         name: None,
         tool_call_id: None,
         tool_calls: None,
