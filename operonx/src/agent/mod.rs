@@ -1,3 +1,4 @@
+pub mod anthropic;
 pub mod events;
 pub mod openai;
 pub mod prompt;

@@ -168,6 +168,7 @@ pub async fn create_run(
         run_id,
         user_id,
         conversation_id,
+        provider: provider.clone(),
         model: model_id,
         openai_api_key: api_key,
         base_url,

@@ -30,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{
+    anthropic,
     events,
     openai::{self, ChatMessage, OpenAiEvent, ToolCall, ToolCallFunction},
     prompt::build_system_message,
@@ -152,6 +153,7 @@ pub struct RunnerSpec {
     pub run_id: RunId,
     pub user_id: Uuid,
     pub conversation_id: Uuid,
+    pub provider: String,
     pub model: String,
     pub openai_api_key: String,
     pub base_url: String,
@@ -222,15 +224,28 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             anyhow::bail!("run cancelled");
         }
 
-        let stream = openai::stream_chat(
-            &client,
-            &spec.openai_api_key,
-            &spec.base_url,
-            &spec.model,
-            &messages,
-            &tool_definitions,
-        )
-        .await?;
+        let stream = if spec.provider == "anthropic" {
+            let s = anthropic::stream_chat(
+                &client,
+                &spec.openai_api_key,
+                &spec.model,
+                &messages,
+                &tool_definitions,
+            )
+            .await?;
+            futures::future::Either::Left(s)
+        } else {
+            let s = openai::stream_chat(
+                &client,
+                &spec.openai_api_key,
+                &spec.base_url,
+                &spec.model,
+                &messages,
+                &tool_definitions,
+            )
+            .await?;
+            futures::future::Either::Right(s)
+        };
         tokio::pin!(stream);
 
         let mut text_started = false;
