@@ -137,25 +137,14 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
           </SidebarGroup>
         ))}
 
-        {/* Recent conversations */}
+        {/* Recent conversations — grouped by date (Copilot-style) */}
         {conversations.length > 0 && (
           <SidebarGroup className="mt-1 py-1">
             <SidebarGroupLabel className="flex items-center gap-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 group-data-[collapsible=icon]:hidden">
               <Clock className="size-3" /> Recent
             </SidebarGroupLabel>
             <SidebarGroupContent className="group-data-[collapsible=icon]:hidden">
-              <div className="space-y-0.5 px-1">
-                {filteredConversations.slice(0, 8).map((c) => (
-                  <Link
-                    key={c._id}
-                    href={`/dashboard/chat?id=${c._id}`}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
-                    <span className="truncate">{c.title || "Untitled"}</span>
-                  </Link>
-                ))}
-              </div>
+              <ConversationDateGroups items={filteredConversations} pathname={pathname} />
             </SidebarGroupContent>
           </SidebarGroup>
         )}
@@ -215,4 +204,93 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
 // Tiny helper used by chat sidebar items if/when we wire delete inline.
 export function _UnusedDeleteIcon() {
   return <Trash2 className="h-3.5 w-3.5" />;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// ConversationDateGroups — Copilot-style date bucketing.
+// Buckets: Today / Yesterday / Previous 7 days / Previous 30 days / Older
+// ────────────────────────────────────────────────────────────────────────
+function ConversationDateGroups({
+  items,
+  pathname,
+}: {
+  items: ConversationSummary[];
+  pathname: string;
+}) {
+  const groups = React.useMemo(() => bucketByDate(items), [items]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="space-y-2 px-1">
+      {groups.map((group) => (
+        <div key={group.label}>
+          <div className="px-2 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50">
+            {group.label}
+          </div>
+          <div className="mt-0.5 space-y-0.5">
+            {group.items.map((c) => {
+              const id = c._id ?? c.id;
+              const channel = c.channel ?? "web";
+              const href =
+                channel === "coding"
+                  ? `/dashboard/coding?id=${id}`
+                  : `/dashboard/chat?id=${id}`;
+              const active =
+                pathname.startsWith(channel === "coding" ? "/dashboard/coding" : "/dashboard/chat") &&
+                pathname.includes(id);
+              return (
+                <div key={id} className="group/conv relative">
+                  <Link
+                    href={href}
+                    className={
+                      "flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] transition-colors " +
+                      (active
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground")
+                    }
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
+                    <span className="truncate">{c.title || "Untitled"}</span>
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function bucketByDate(items: ConversationSummary[]) {
+  const now = Date.now();
+  const dayMs = 86_400_000;
+  const today: ConversationSummary[] = [];
+  const yesterday: ConversationSummary[] = [];
+  const prev7: ConversationSummary[] = [];
+  const prev30: ConversationSummary[] = [];
+  const older: ConversationSummary[] = [];
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayMs = startOfToday.getTime();
+
+  for (const c of items) {
+    const ts = Date.parse(c.updatedAt) || 0;
+    const age = now - ts;
+    if (ts >= todayMs) today.push(c);
+    else if (ts >= todayMs - dayMs) yesterday.push(c);
+    else if (age < dayMs * 7) prev7.push(c);
+    else if (age < dayMs * 30) prev30.push(c);
+    else older.push(c);
+  }
+
+  return [
+    { label: "Today", items: today },
+    { label: "Yesterday", items: yesterday },
+    { label: "Previous 7 days", items: prev7 },
+    { label: "Previous 30 days", items: prev30 },
+    { label: "Older", items: older },
+  ].filter((g) => g.items.length > 0);
 }

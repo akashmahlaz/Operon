@@ -11,10 +11,20 @@ import type {
   ToolCallEvent,
   TextDeltaEvent,
   SourceUrlEvent,
+  ProgressEvent,
+  AnchorEvent,
+  ReferenceEvent,
+  CodeblockUriEvent,
+  TextEditEvent,
+  ConfirmationEvent,
+  CommandButtonEvent,
+  WarningEvent,
+  UsageEvent,
 } from "@/hooks/use-stream-events/types";
 import { getToolLabel, TOOL_STATE_LABELS } from "@/hooks/use-stream-events/types";
 import {
   AlertCircle,
+  AlertTriangle,
   Check,
   Circle,
   Copy,
@@ -25,6 +35,8 @@ import {
   MessageSquareText,
   PencilLine,
   Search,
+  ChevronRight,
+  FileText,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -97,10 +109,23 @@ function ToolIcon({
 }
 
 // ---------------------------------------------------------------------------
-// ToolCallItem — renders a single tool entry with live state updates
+// ToolCallItem — Copilot-style: invocationMessage during, pastTenseMessage after,
+// collapsible to reveal args + result.
 // ---------------------------------------------------------------------------
 function ToolCallItem({ event }: { event: ToolCallEvent }) {
-  const detail = (() => {
+  const [open, setOpen] = useState(false);
+  const isPending = ["calling", "input-streaming", "input-available", "executing"].includes(
+    event.state
+  );
+  const isError = event.state === "output-error";
+
+  // Prefer Copilot-style messages when present, otherwise fall back to the
+  // raw tool name + an extracted detail.
+  const msg = isPending
+    ? event.invocationMessage
+    : (event.pastTenseMessage ?? event.invocationMessage);
+
+  const fallbackDetail = (() => {
     if (event.result && typeof event.result === "object") {
       const r = event.result as Record<string, unknown>;
       return (
@@ -126,30 +151,238 @@ function ToolCallItem({ event }: { event: ToolCallEvent }) {
   })();
 
   return (
-    <div className="group/tool relative flex items-start gap-2.5 py-1 text-[13px] text-muted-foreground">
-      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
-        <ToolIcon toolName={event.toolName} state={event.state} />
+    <div className="group/tool relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-start gap-2.5 py-1 text-left text-[13px] text-muted-foreground hover:text-foreground/80"
+      >
+        <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+          <ToolIcon toolName={event.toolName} state={event.state} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            {msg ? (
+              <span
+                className={cn(
+                  "truncate",
+                  isError && "text-destructive"
+                )}
+                /* invocationMessage / pastTenseMessage are markdown-ish; render plain. */
+              >
+                {msg}
+              </span>
+            ) : (
+              <>
+                <span className={cn("truncate", isError && "text-destructive")}>
+                  {getToolLabel(event.toolName)}
+                </span>
+                <span className="shrink-0 text-[12px] text-muted-foreground/55">
+                  {TOOL_STATE_LABELS[event.state] ?? event.state}
+                </span>
+              </>
+            )}
+            <ChevronRight
+              className={cn(
+                "ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform",
+                open && "rotate-90"
+              )}
+            />
+          </div>
+          {!msg && fallbackDetail && (
+            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/50">
+              {typeof fallbackDetail === "string" ? fallbackDetail : JSON.stringify(fallbackDetail)}
+            </div>
+          )}
+        </div>
+      </button>
+
+      {open && (
+        <div className="mt-1 ml-6 rounded-md border border-border/60 bg-muted/30 p-2 text-[11px]">
+          {event.args !== undefined && (
+            <div className="mb-1">
+              <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                Input
+              </div>
+              <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-foreground/80">
+                {JSON.stringify(event.args, null, 2)}
+              </pre>
+            </div>
+          )}
+          {event.errorText && (
+            <div className="mb-1">
+              <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-destructive/80">
+                Error
+              </div>
+              <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-destructive">
+                {event.errorText}
+              </pre>
+            </div>
+          )}
+          {event.result !== undefined && !event.errorText && (
+            <div>
+              <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                Output
+              </div>
+              <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-foreground/80">
+                {typeof event.result === "string"
+                  ? event.result
+                  : JSON.stringify(event.result, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inline atomic part renderers — progress / anchor / reference / warning /
+// codeblock-uri / text-edit / confirmation / command-button / usage
+// ---------------------------------------------------------------------------
+function ProgressLine({ ev }: { ev: ProgressEvent }) {
+  return (
+    <div className="flex items-center gap-2 py-1 text-[12px] italic text-muted-foreground/75">
+      <Loader2 className="size-3 shrink-0 animate-spin" />
+      <span className="truncate">{ev.text}</span>
+    </div>
+  );
+}
+
+function AnchorChip({ ev }: { ev: AnchorEvent }) {
+  const label = ev.title ?? ev.uri.split(/[\\\/]/).pop() ?? ev.uri;
+  return (
+    <a
+      href={ev.uri}
+      className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 align-middle font-mono text-[11px] text-foreground/85 hover:border-border hover:bg-muted/70"
+    >
+      <FileText className="size-2.5 shrink-0" />
+      <span className="truncate max-w-55">
+        {label}
+        {typeof ev.line === "number" ? `:${ev.line}` : ""}
       </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
+    </a>
+  );
+}
+
+function ReferencePills({ refs }: { refs: ReferenceEvent[] }) {
+  if (!refs.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 py-1">
+      {refs.map((r, i) => {
+        const label = r.title ?? r.uri.split(/[\\\/]/).pop() ?? r.uri;
+        const statusColor =
+          r.status === "error"
+            ? "text-destructive border-destructive/40"
+            : r.status === "loading"
+              ? "text-muted-foreground/60 border-border/40"
+              : "text-muted-foreground border-border/60";
+        return (
           <span
+            key={i}
             className={cn(
-              "truncate",
-              event.state === "output-error" && "text-destructive"
+              "inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-[11px]",
+              statusColor
             )}
           >
-            {getToolLabel(event.toolName)}
+            {r.status === "loading" && <Loader2 className="size-2.5 animate-spin" />}
+            <span className="max-w-50 truncate">{label}</span>
           </span>
-          <span className="shrink-0 text-[12px] text-muted-foreground/55">
-            {TOOL_STATE_LABELS[event.state] ?? event.state}
+        );
+      })}
+    </div>
+  );
+}
+
+function WarningBanner({ ev }: { ev: WarningEvent }) {
+  return (
+    <div className="my-1 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+      <span>{ev.text}</span>
+    </div>
+  );
+}
+
+function CodeblockUriHeader({ ev }: { ev: CodeblockUriEvent }) {
+  return (
+    <div className="-mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/75">
+      <FileCode2 className="size-3" />
+      <span className="font-mono">{ev.uri}</span>
+      {ev.isEdit && <span className="text-amber-500/80">(edit)</span>}
+    </div>
+  );
+}
+
+function TextEditCard({ ev }: { ev: TextEditEvent }) {
+  return (
+    <div className="my-1 rounded-md border border-border/60 bg-muted/30 p-2 text-[12px]">
+      <div className="mb-1 flex items-center gap-1.5 text-muted-foreground">
+        <PencilLine className="size-3" />
+        <span className="font-mono">{ev.target}</span>
+        {ev.isDone && (
+          <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] text-emerald-600">
+            <Check className="size-2.5" /> Done
           </span>
-        </div>
-        {detail && (
-          <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/50">
-            {typeof detail === "string" ? detail : JSON.stringify(detail)}
-          </div>
         )}
       </div>
+      <pre className="overflow-x-auto font-mono text-[11px] text-foreground/80">
+        {typeof ev.edits === "string" ? ev.edits : JSON.stringify(ev.edits, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
+function ConfirmationCard({
+  ev,
+  onResolve,
+}: {
+  ev: ConfirmationEvent;
+  onResolve?: (id: string, choice: string) => void;
+}) {
+  return (
+    <div className="my-2 rounded-lg border border-border/70 bg-muted/30 p-3 text-[13px]">
+      <div className="mb-1 font-medium text-foreground">{ev.title}</div>
+      <div className="mb-2 text-muted-foreground">{ev.message}</div>
+      <div className="flex flex-wrap gap-2">
+        {ev.buttons.map((btn) => (
+          <button
+            key={btn}
+            type="button"
+            disabled={!!ev.resolution}
+            onClick={() => onResolve?.(ev.confirmationId, btn)}
+            className={cn(
+              "rounded-md border px-3 py-1 text-[12px] transition-colors",
+              ev.resolution === btn
+                ? "border-primary/60 bg-primary/10 text-primary"
+                : "border-border/60 hover:border-border hover:bg-muted"
+            )}
+          >
+            {btn}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CommandButton({ ev }: { ev: CommandButtonEvent }) {
+  return (
+    <button
+      type="button"
+      className="my-1 inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[12px] hover:border-border hover:bg-muted"
+      title={ev.command}
+    >
+      {ev.title}
+    </button>
+  );
+}
+
+function UsageBadge({ ev }: { ev: UsageEvent }) {
+  return (
+    <div className="mt-2 text-[10px] text-muted-foreground/50">
+      {ev.totalTokens.toLocaleString()} tokens · {ev.promptTokens.toLocaleString()} in ·{" "}
+      {ev.completionTokens.toLocaleString()} out
     </div>
   );
 }
@@ -301,7 +534,7 @@ function SourceUrlPills({ urls }: { urls: SourceUrlEvent[] }) {
             className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/60 px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
           >
             <ExternalLink className="size-2.5 shrink-0" />
-            <span className="max-w-[180px] truncate">{u.title || host}</span>
+            <span className="max-w-45 truncate">{u.title || host}</span>
           </a>
         );
       })}
@@ -316,7 +549,16 @@ type RenderSegment =
   | { kind: "reasoning"; events: ReasoningPartEvent[] }
   | { kind: "tools"; tools: ToolCallEvent[] }
   | { kind: "text"; events: TextDeltaEvent[] }
-  | { kind: "sources"; urls: SourceUrlEvent[] };
+  | { kind: "sources"; urls: SourceUrlEvent[] }
+  | { kind: "references"; refs: ReferenceEvent[] }
+  | { kind: "progress"; ev: ProgressEvent }
+  | { kind: "anchor"; ev: AnchorEvent }
+  | { kind: "warning"; ev: WarningEvent }
+  | { kind: "codeblock-uri"; ev: CodeblockUriEvent }
+  | { kind: "text-edit"; ev: TextEditEvent }
+  | { kind: "confirmation"; ev: ConfirmationEvent }
+  | { kind: "command-button"; ev: CommandButtonEvent }
+  | { kind: "usage"; ev: UsageEvent };
 
 function buildSegments(parts: StreamPart[]): RenderSegment[] {
   const segs: RenderSegment[] = [];
@@ -337,7 +579,7 @@ function buildSegments(parts: StreamPart[]): RenderSegment[] {
       }
     } else if (part.type.startsWith("tool-call")) {
       const t = part as ToolCallEvent;
-      if (seenToolIds.has(t.toolCallId)) continue; // in-place mutation — already tracked
+      if (seenToolIds.has(t.toolCallId)) continue;
       seenToolIds.add(t.toolCallId);
       if (last?.kind === "tools") {
         last.tools.push(t);
@@ -356,6 +598,28 @@ function buildSegments(parts: StreamPart[]): RenderSegment[] {
       } else {
         segs.push({ kind: "sources", urls: [part as SourceUrlEvent] });
       }
+    } else if (part.type === "reference") {
+      if (last?.kind === "references") {
+        last.refs.push(part as ReferenceEvent);
+      } else {
+        segs.push({ kind: "references", refs: [part as ReferenceEvent] });
+      }
+    } else if (part.type === "progress") {
+      segs.push({ kind: "progress", ev: part as ProgressEvent });
+    } else if (part.type === "anchor") {
+      segs.push({ kind: "anchor", ev: part as AnchorEvent });
+    } else if (part.type === "warning") {
+      segs.push({ kind: "warning", ev: part as WarningEvent });
+    } else if (part.type === "codeblock-uri") {
+      segs.push({ kind: "codeblock-uri", ev: part as CodeblockUriEvent });
+    } else if (part.type === "text-edit") {
+      segs.push({ kind: "text-edit", ev: part as TextEditEvent });
+    } else if (part.type === "confirmation") {
+      segs.push({ kind: "confirmation", ev: part as ConfirmationEvent });
+    } else if (part.type === "command-button") {
+      segs.push({ kind: "command-button", ev: part as CommandButtonEvent });
+    } else if (part.type === "usage") {
+      segs.push({ kind: "usage", ev: part as UsageEvent });
     }
   }
 
@@ -535,6 +799,33 @@ function StreamingAssistantMessage({
             }
             if (seg.kind === "sources") {
               return <SourceUrlPills key={i} urls={seg.urls} />;
+            }
+            if (seg.kind === "references") {
+              return <ReferencePills key={i} refs={seg.refs} />;
+            }
+            if (seg.kind === "progress") {
+              return <ProgressLine key={i} ev={seg.ev} />;
+            }
+            if (seg.kind === "anchor") {
+              return <AnchorChip key={i} ev={seg.ev} />;
+            }
+            if (seg.kind === "warning") {
+              return <WarningBanner key={i} ev={seg.ev} />;
+            }
+            if (seg.kind === "codeblock-uri") {
+              return <CodeblockUriHeader key={i} ev={seg.ev} />;
+            }
+            if (seg.kind === "text-edit") {
+              return <TextEditCard key={i} ev={seg.ev} />;
+            }
+            if (seg.kind === "confirmation") {
+              return <ConfirmationCard key={i} ev={seg.ev} />;
+            }
+            if (seg.kind === "command-button") {
+              return <CommandButton key={i} ev={seg.ev} />;
+            }
+            if (seg.kind === "usage") {
+              return <UsageBadge key={i} ev={seg.ev} />;
             }
             return null;
           })}

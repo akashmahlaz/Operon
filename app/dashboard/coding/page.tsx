@@ -2,15 +2,14 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Code2, Loader2, Plus, Square, Send, FolderOpen } from "lucide-react";
+import { Code2, Loader2, Plus, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { StreamingChatMessageList } from "@/components/chat/message/streaming-message";
+import { CopilotComposer } from "@/components/chat/composer/copilot-composer";
 import { useStreamEvents } from "@/hooks/use-stream-events";
 import type { StreamingMessage } from "@/hooks/use-stream-events/types";
 import { hydrateMessageParts } from "@/lib/chat/hydrate-message-parts";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { operonFetch } from "@/lib/operon-api";
 
@@ -37,8 +36,9 @@ function CodingPageInner() {
   const [conversationId, setConversationId] = useState<string | null>(urlId);
   const [hydrating, setHydrating] = useState<boolean>(Boolean(urlId));
   const [input, setInput] = useState("");
+  const [model, setModel] = useState("gpt-4o-mini");
+  const [toolsEnabled, setToolsEnabled] = useState(true);
   const ensuredRef = useRef(false);
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const {
@@ -120,20 +120,36 @@ function CodingPageInner() {
     el.scrollTop = el.scrollHeight;
   }, [messages, isLoading]);
 
-  const submit = useCallback(() => {
-    const trimmed = input.trim();
-    if (!trimmed || isLoading) return;
-    sendMessage(trimmed, { conversationId, channel: "coding" });
-    setInput("");
-    requestAnimationFrame(() => composerRef.current?.focus());
-  }, [input, isLoading, conversationId, sendMessage]);
+  const submit = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || isLoading) return;
+      // Built-in slash commands handled client-side.
+      if (trimmed === "/new") {
+        newSessionLocal();
+        setInput("");
+        return;
+      }
+      if (trimmed === "/clear") {
+        setMessages([]);
+        setInput("");
+        return;
+      }
+      sendMessage(trimmed, { conversationId, channel: "coding", modelSpec: model });
+      setInput("");
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [input, isLoading, conversationId, sendMessage, model]
+  );
 
-  const newSession = useCallback(() => {
+  const newSessionLocal = useCallback(() => {
     setMessages([]);
     setConversationId(null);
     ensuredRef.current = false;
     router.replace(`/dashboard/coding`);
   }, [router, setMessages]);
+
+  const newSession = newSessionLocal;
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
@@ -204,57 +220,25 @@ function CodingPageInner() {
       {/* Composer */}
       <div className="border-t border-border/40 bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto max-w-3xl">
-          <div className="relative rounded-xl border border-border/60 bg-card shadow-sm focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-primary/30">
-            <Textarea
-              ref={composerRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submit();
-                }
-              }}
-              placeholder={
-                conversationId
-                  ? "Tell the coding agent what to build, fix, or explore…"
-                  : "Describe what you want the agent to build…"
-              }
-              disabled={hydrating}
-              rows={2}
-              className={cn(
-                "min-h-15 resize-none border-0 bg-transparent px-4 py-3 pr-14 text-sm",
-                "shadow-none focus-visible:ring-0 focus-visible:ring-offset-0",
-              )}
-            />
-            <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
-              {isLoading ? (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-8 rounded-lg"
-                  onClick={() => stop()}
-                  title="Stop"
-                >
-                  <Square className="size-4 fill-current" />
-                </Button>
-              ) : (
-                <Button
-                  size="icon"
-                  className="size-8 rounded-lg"
-                  onClick={submit}
-                  disabled={!input.trim() || hydrating}
-                  title="Send"
-                >
-                  <Send className="size-4" />
-                </Button>
-              )}
-            </div>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>Enter to send · Shift+Enter for newline</span>
-            <span className="font-mono">channel: coding · max 200 steps/turn</span>
-          </div>
+          <CopilotComposer
+            value={input}
+            onChange={setInput}
+            onSubmit={submit}
+            onStop={stop}
+            isStreaming={isLoading}
+            disabled={hydrating}
+            placeholder={
+              conversationId
+                ? "Tell the coding agent what to build, fix, or explore…"
+                : "Describe what you want the agent to build…"
+            }
+            model={model}
+            models={["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]}
+            onModelChange={setModel}
+            toolsEnabled={toolsEnabled}
+            onToolsToggle={setToolsEnabled}
+            footerHint={`channel: coding · max 200 steps/turn`}
+          />
         </div>
       </div>
     </div>

@@ -32,10 +32,58 @@ use uuid::Uuid;
 use super::{
     events,
     openai::{self, ChatMessage, OpenAiEvent, ToolCall, ToolCallFunction},
-    prompt::{CODING_SYSTEM_PROMPT, build_system_message},
+    prompt::build_system_message,
     tools::{self, Workspace},
     types::{AgentEvent, RunId, RunStatus},
 };
+
+/// Build a present-tense + past-tense pair for a tool call so the UI can
+/// show "Reading file `foo.ts`…" while running and "Read file `foo.ts`"
+/// after. Mirrors Copilot's `invocationMessage` / `pastTenseMessage`.
+fn tool_messages(name: &str, args: &Value) -> (String, String) {
+    let target = args
+        .get("path")
+        .or_else(|| args.get("target"))
+        .or_else(|| args.get("query"))
+        .or_else(|| args.get("command"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let target_md = if target.is_empty() {
+        String::new()
+    } else {
+        format!(" `{}`", target)
+    };
+    match name {
+        "read_file" => (
+            format!("Reading{}", target_md),
+            format!("Read{}", target_md),
+        ),
+        "write_file" => (
+            format!("Writing{}", target_md),
+            format!("Wrote{}", target_md),
+        ),
+        "apply_patch" => (
+            "Applying edits".to_owned(),
+            "Applied edits".to_owned(),
+        ),
+        "list_dir" => (
+            format!("Listing{}", target_md),
+            format!("Listed{}", target_md),
+        ),
+        "search" => (
+            format!("Searching{}", target_md),
+            format!("Searched{}", target_md),
+        ),
+        "exec" => (
+            format!("Running{}", target_md),
+            format!("Ran{}", target_md),
+        ),
+        other => (
+            format!("Running `{}`", other),
+            format!("Ran `{}`", other),
+        ),
+    }
+}
 
 const BROADCAST_CAPACITY: usize = 1024;
 const DEFAULT_MAX_STEPS: usize = 200;
@@ -205,7 +253,19 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                         tool_call_started.push(false);
                     }
                     if !tool_call_started[index] {
-                        handle.emit(&events::tool_call_start(&id, &name)).await?;
+                        // Args aren't streamed yet — emit start with the
+                        // tool name only; runner will follow up with
+                        // tool-call-update once args parse.
+                        let (invocation, _past) =
+                            tool_messages(&name, &serde_json::Value::Null);
+                        handle
+                            .emit(&events::tool_call_start(
+                                &id,
+                                &name,
+                                Some(&invocation),
+                                None,
+                            ))
+                            .await?;
                         tool_call_started[index] = true;
                     }
                 }
@@ -272,6 +332,16 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             }
             let parsed_input: Value =
                 serde_json::from_str(&tc.function.arguments).unwrap_or(json!({}));
+            let (invocation, past_tense) = tool_messages(&tc.function.name, &parsed_input);
+            // Update the card with a richer invocation message now that we
+            // have the parsed args.
+            handle
+                .emit(&events::tool_call_update(
+                    &tc.id,
+                    Some(&invocation),
+                    None,
+                ))
+                .await?;
             handle
                 .emit(&events::tool_call_input_available(&tc.id, &parsed_input))
                 .await?;
@@ -282,7 +352,11 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             let (result_value, error_text) = match dispatch_result {
                 Ok(value) => {
                     handle
-                        .emit(&events::tool_call_output_available(&tc.id, &value))
+                        .emit(&events::tool_call_output_available(
+                            &tc.id,
+                            &value,
+                            Some(&past_tense),
+                        ))
                         .await?;
                     (value, None)
                 }
@@ -303,6 +377,8 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                 "args": parsed_input,
                 "result": result_value,
                 "errorText": error_text,
+                "invocationMessage": invocation,
+                "pastTenseMessage": past_tense,
                 "state": if error_text.is_some() { "output-error" } else { "output-available" },
             }));
 

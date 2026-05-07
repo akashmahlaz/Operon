@@ -1,7 +1,10 @@
-"use client";
+﻿"use client";
 
 // Individual streaming content part events
 // These represent in-order events as they arrive from the SSE stream
+//
+// Vocabulary mirrors VS Code's ChatResponseStream
+// (vscode-copilot-chat/src/util/common/chatResponseStreamImpl.ts).
 
 export type ContentPartType =
   | "reasoning-start"
@@ -16,7 +19,16 @@ export type ContentPartType =
   | "tool-call-end"
   | "text-delta"
   | "text-end"
-  | "source-url";
+  | "source-url"
+  | "progress"
+  | "anchor"
+  | "reference"
+  | "codeblock-uri"
+  | "text-edit"
+  | "confirmation"
+  | "command-button"
+  | "warning"
+  | "usage";
 
 export interface ReasoningPartEvent {
   id: string;
@@ -32,6 +44,12 @@ export interface ToolCallEvent {
   args?: Record<string, unknown>;
   result?: unknown;
   errorText?: string;
+  /** Present-tense status shown while running ("Reading file `foo.ts`â€¦"). */
+  invocationMessage?: string;
+  /** Past-tense status shown after completion ("Read file `foo.ts`"). */
+  pastTenseMessage?: string;
+  /** Optional initiator label (e.g. tool group). */
+  originMessage?: string;
   state:
     | "calling"
     | "input-streaming"
@@ -54,12 +72,101 @@ export interface SourceUrlEvent {
   title?: string;
 }
 
+/** Inline status line ("Reading workspaceâ€¦"). */
+export interface ProgressEvent {
+  id: string;
+  type: "progress";
+  text: string;
+}
+
+/** Inline clickable file/symbol anchor. */
+export interface AnchorEvent {
+  id: string;
+  type: "anchor";
+  uri: string;
+  title?: string;
+  line?: number;
+}
+
+/** Sidebar reference chip with a status. */
+export interface ReferenceEvent {
+  id: string;
+  type: "reference";
+  uri: string;
+  title?: string;
+  status?: "loading" | "success" | "error" | "omitted" | "partial";
+}
+
+/** Associate the next ``` block with a file. */
+export interface CodeblockUriEvent {
+  id: string;
+  type: "codeblock-uri";
+  uri: string;
+  isEdit?: boolean;
+}
+
+/** Streaming edit chunk for a file. */
+export interface TextEditEvent {
+  id: string;
+  type: "text-edit";
+  target: string;
+  edits: unknown;
+  isDone?: boolean;
+}
+
+/** Confirmation card (Yes/No or custom buttons). */
+export interface ConfirmationEvent {
+  id: string;
+  type: "confirmation";
+  confirmationId: string;
+  title: string;
+  message: string;
+  data: unknown;
+  buttons: string[];
+  /** Filled in when the user picks a button. */
+  resolution?: string;
+}
+
+/** Inline command button. */
+export interface CommandButtonEvent {
+  id: string;
+  type: "command-button";
+  command: string;
+  title: string;
+  args: unknown;
+}
+
+/** Warning banner inside the assistant response. */
+export interface WarningEvent {
+  id: string;
+  type: "warning";
+  text: string;
+}
+
+/** Token usage emitted on completion. */
+export interface UsageEvent {
+  id: string;
+  type: "usage";
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 // A single ordered part in the stream
 export type StreamPart =
   | ReasoningPartEvent
   | ToolCallEvent
   | TextDeltaEvent
-  | SourceUrlEvent;
+  | SourceUrlEvent
+  | ProgressEvent
+  | AnchorEvent
+  | ReferenceEvent
+  | CodeblockUriEvent
+  | TextEditEvent
+  | ConfirmationEvent
+  | CommandButtonEvent
+  | WarningEvent
+  | UsageEvent;
 
 // Full ordered list for a message being built
 export interface StreamingMessage {
@@ -83,6 +190,8 @@ export interface UIMessagePart {
   state?: string;
   url?: string;
   title?: string;
+  invocationMessage?: string;
+  pastTenseMessage?: string;
 }
 
 // Re-export tool call part for compatibility

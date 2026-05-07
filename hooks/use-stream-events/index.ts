@@ -8,12 +8,22 @@ import type {
   ToolCallEvent,
   TextDeltaEvent,
   SourceUrlEvent,
+  ProgressEvent,
+  AnchorEvent,
+  ReferenceEvent,
+  CodeblockUriEvent,
+  TextEditEvent,
+  ConfirmationEvent,
+  CommandButtonEvent,
+  WarningEvent,
+  UsageEvent,
 } from "./types";
 import { operonFetch } from "@/lib/operon-api";
 
 // ---------------------------------------------------------------------------
-// SSE event shape emitted by /api/chat and /api/coding.
+// SSE event shape emitted by the Rust agent backend.
 // The server sends custom JSON envelopes as SSE data frames.
+// Vocabulary mirrors VS Code Copilot's ChatResponseStream.
 // ---------------------------------------------------------------------------
 
 type SSEEventType =
@@ -21,6 +31,7 @@ type SSEEventType =
   | "reasoning-delta"
   | "reasoning-end"
   | "tool-call-start"
+  | "tool-call-update"
   | "tool-call-input-streaming"
   | "tool-call-input-available"
   | "tool-call-execute"
@@ -29,8 +40,18 @@ type SSEEventType =
   | "tool-call-end"
   | "text-delta"
   | "text-end"
+  | "codeblock-uri"
+  | "text-edit"
   | "source-url"
-  | "message-end";
+  | "progress"
+  | "anchor"
+  | "reference"
+  | "confirmation"
+  | "command-button"
+  | "warning"
+  | "usage"
+  | "message-end"
+  | "error";
 
 interface SSEEvent {
   type: SSEEventType;
@@ -39,11 +60,28 @@ interface SSEEvent {
     text?: string;
     toolCallId?: string;
     toolName?: string;
+    invocationMessage?: string;
+    pastTenseMessage?: string;
+    originMessage?: string;
     args?: Record<string, unknown>;
     result?: unknown;
     errorText?: string;
     url?: string;
     title?: string;
+    uri?: string;
+    line?: number;
+    isEdit?: boolean;
+    status?: "loading" | "success" | "error" | "omitted" | "partial";
+    target?: string;
+    edits?: unknown;
+    isDone?: boolean;
+    message?: string;
+    data?: unknown;
+    buttons?: string[];
+    command?: string;
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
   };
 }
 
@@ -246,7 +284,16 @@ export function useStreamEvents({
           type: "tool-call-start",
           state: "calling",
           args: ev.data.args,
+          invocationMessage: ev.data.invocationMessage,
+          originMessage: ev.data.originMessage,
         } satisfies ToolCallEvent);
+        break;
+
+      case "tool-call-update":
+        updateToolCall(ev.data.toolCallId ?? "", {
+          invocationMessage: ev.data.invocationMessage,
+          pastTenseMessage: ev.data.pastTenseMessage,
+        });
         break;
 
       case "tool-call-input-streaming":
@@ -261,6 +308,7 @@ export function useStreamEvents({
         updateToolCall(ev.data.toolCallId ?? "", {
           type: "tool-call-input-available",
           state: "input-available",
+          args: ev.data.args,
         });
         break;
 
@@ -276,6 +324,7 @@ export function useStreamEvents({
           type: "tool-call-output-available",
           state: "output-available",
           result: ev.data.result,
+          pastTenseMessage: ev.data.pastTenseMessage,
         });
         break;
 
@@ -318,6 +367,100 @@ export function useStreamEvents({
           title: ev.data.title,
         } satisfies SourceUrlEvent);
         break;
+
+      case "progress":
+        appendPart({
+          id: nextId(),
+          type: "progress",
+          text: ev.data.text ?? "",
+        } satisfies ProgressEvent);
+        break;
+
+      case "anchor":
+        appendPart({
+          id: nextId(),
+          type: "anchor",
+          uri: ev.data.uri ?? "",
+          title: ev.data.title,
+          line: ev.data.line,
+        } satisfies AnchorEvent);
+        break;
+
+      case "reference":
+        appendPart({
+          id: nextId(),
+          type: "reference",
+          uri: ev.data.uri ?? "",
+          title: ev.data.title,
+          status: ev.data.status,
+        } satisfies ReferenceEvent);
+        break;
+
+      case "codeblock-uri":
+        appendPart({
+          id: nextId(),
+          type: "codeblock-uri",
+          uri: ev.data.uri ?? "",
+          isEdit: ev.data.isEdit,
+        } satisfies CodeblockUriEvent);
+        break;
+
+      case "text-edit":
+        appendPart({
+          id: nextId(),
+          type: "text-edit",
+          target: ev.data.target ?? "",
+          edits: ev.data.edits,
+          isDone: ev.data.isDone,
+        } satisfies TextEditEvent);
+        break;
+
+      case "confirmation":
+        appendPart({
+          id: nextId(),
+          type: "confirmation",
+          confirmationId: ev.data.id ?? nextId(),
+          title: ev.data.title ?? "",
+          message: ev.data.message ?? "",
+          data: ev.data.data,
+          buttons: ev.data.buttons ?? ["OK"],
+        } satisfies ConfirmationEvent);
+        break;
+
+      case "command-button":
+        appendPart({
+          id: nextId(),
+          type: "command-button",
+          command: ev.data.command ?? "",
+          title: ev.data.title ?? "",
+          args: ev.data.args,
+        } satisfies CommandButtonEvent);
+        break;
+
+      case "warning":
+        appendPart({
+          id: nextId(),
+          type: "warning",
+          text: ev.data.text ?? "",
+        } satisfies WarningEvent);
+        break;
+
+      case "usage":
+        appendPart({
+          id: nextId(),
+          type: "usage",
+          promptTokens: ev.data.promptTokens ?? 0,
+          completionTokens: ev.data.completionTokens ?? 0,
+          totalTokens: ev.data.totalTokens ?? 0,
+        } satisfies UsageEvent);
+        break;
+
+      case "error": {
+        const e = new Error(ev.data.errorText ?? "Unknown error");
+        setError(e);
+        setStatus("error");
+        break;
+      }
 
       case "message-end":
         if (assistantMessageRef.current) {
