@@ -504,26 +504,50 @@ function ReasoningBlock({
 // ---------------------------------------------------------------------------
 function CodeBlockFenced({ code, lang }: { code: string; lang: string }) {
   const [copied, setCopied] = useState(false);
+  const [applied, setApplied] = useState(false);
+  const looksLikeCode =
+    !!lang && !["text", "txt", "plaintext", "log", "output"].includes(lang.toLowerCase());
   return (
     <div className="group/code relative my-2 overflow-hidden rounded-xl bg-[hsl(220,13%,14%)] text-[hsl(220,14%,90%)] ring-1 ring-white/10">
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-2">
         <span className="font-mono text-[10px] uppercase tracking-wider text-white/40">
           {lang || "code"}
         </span>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(code);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-          }}
-          className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white/70"
-        >
-          {copied ? (
-            <><Check className="size-3" /> Copied</>
-          ) : (
-            <><Copy className="size-3" /> Copy</>
+        <div className="flex items-center gap-3">
+          {looksLikeCode && (
+            <button
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent("copilot:apply-code", { detail: { code, lang } }),
+                );
+                setApplied(true);
+                setTimeout(() => setApplied(false), 2000);
+              }}
+              className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white/70"
+              title="Apply this code (dispatches copilot:apply-code event)"
+            >
+              {applied ? (
+                <><Check className="size-3" /> Applied</>
+              ) : (
+                <><FileText className="size-3" /> Apply</>
+              )}
+            </button>
           )}
-        </button>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(code);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }}
+            className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white/70"
+          >
+            {copied ? (
+              <><Check className="size-3" /> Copied</>
+            ) : (
+              <><Copy className="size-3" /> Copy</>
+            )}
+          </button>
+        </div>
       </div>
       <pre className="overflow-x-auto p-4 text-[13px] leading-relaxed">
         <code className="font-mono">{code}</code>

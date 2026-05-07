@@ -1320,6 +1320,8 @@ function ChatPage() {
               messages={chatMessages as StreamingMessage[]}
               conversationId={conversationId}
               onCompacted={() => loadConversations()}
+              error={chatError}
+              onContinue={() => handleSend("Continue")}
             />
             <div className="relative flex flex-col rounded-2xl border border-border bg-card shadow-sm transition-all duration-200 focus-within:border-primary/30 focus-within:shadow-md">
               {attachedFiles.length > 0 && (
@@ -1414,10 +1416,14 @@ function ConversationStatusBar({
   messages,
   conversationId,
   onCompacted,
+  error,
+  onContinue,
 }: {
   messages: StreamingMessage[];
   conversationId: string | null;
   onCompacted?: () => void;
+  error?: Error | null;
+  onContinue?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -1433,6 +1439,15 @@ function ConversationStatusBar({
     return null;
   })();
 
+  // Step counter: total tool calls across the whole conversation.
+  let stepCount = 0;
+  for (const m of messages) {
+    for (const p of m.orderedParts) {
+      const t = (p as { type?: string }).type;
+      if (t === "tool-call-start" || t === "tool-call-input-available") stepCount++;
+    }
+  }
+
   const totalMsgs = messages.length;
   // Heuristic compaction trigger: > 30 messages OR > ~80% of a 128k window.
   const ctxWindow = 128_000;
@@ -1440,7 +1455,7 @@ function ConversationStatusBar({
   const pct = Math.min(1, used / ctxWindow);
   const shouldNudge = totalMsgs > 30 || pct > 0.8;
 
-  if (!conversationId || (totalMsgs < 6 && !usage)) return null;
+  if (!conversationId || (totalMsgs < 6 && !usage && !error)) return null;
 
   async function compact() {
     if (!conversationId) return;
@@ -1467,22 +1482,43 @@ function ConversationStatusBar({
             {used.toLocaleString()} tok · {Math.round(pct * 100)}% of {Math.round(ctxWindow / 1000)}k
           </span>
         )}
+        {stepCount > 0 && (
+          <span className="font-mono">· {stepCount} step{stepCount === 1 ? "" : "s"}</span>
+        )}
         {shouldNudge && (
           <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-600">
             context filling up
           </span>
         )}
+        {error && (
+          <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">
+            run interrupted
+          </span>
+        )}
       </div>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={compact}
-        className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-0.5 text-[11px] hover:bg-muted disabled:opacity-50"
-        title="Summarize earlier turns to free up context"
-      >
-        {busy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
-        Compact
-      </button>
+      <div className="flex items-center gap-1.5">
+        {error && onContinue && (
+          <button
+            type="button"
+            onClick={onContinue}
+            className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-0.5 text-[11px] hover:bg-muted"
+            title="Continue from where the agent stopped"
+          >
+            <ChevronRight className="size-3" />
+            Continue
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={compact}
+          className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-0.5 text-[11px] hover:bg-muted disabled:opacity-50"
+          title="Summarize earlier turns to free up context"
+        >
+          {busy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+          Compact
+        </button>
+      </div>
     </div>
   );
 }
