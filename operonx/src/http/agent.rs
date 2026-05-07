@@ -277,19 +277,45 @@ pub async fn sse_run(
     let combined: futures::stream::BoxStream<'static, Result<Event, Infallible>> =
         if let Some(handle) = live {
             let receiver = handle.subscribe();
+            // Stop the SSE stream after a terminal frame (`message-end` or
+            // `run-completed`). Without this the keep-alive pings keep the
+            // body open forever and the client stays stuck in `streaming`.
             let live_stream = tokio_stream::wrappers::BroadcastStream::new(receiver)
                 .filter_map(|item| async move {
                     match item {
-                        Ok(event) => Some(Ok(to_sse_event(event))),
-                        Err(_) => None, // dropped messages — client can resume by last_seq
+                        Ok(event) => Some(Ok::<_, Infallible>(event)),
+                        Err(_) => None,
                     }
                 });
-            replay_stream.chain(live_stream).boxed()
+            let mut stopped = false;
+            let live_terminating = live_stream.take_while(move |item| {
+                if stopped {
+                    return futures::future::ready(false);
+                }
+                if let Ok(ev) = item {
+                    let kind = ev
+                        .frame
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if matches!(kind, "message-end" | "run-completed" | "run-failed" | "run-cancelled") {
+                        stopped = true;
+                    }
+                }
+                futures::future::ready(true)
+            });
+            let mapped = live_terminating.map(|item| item.map(to_sse_event));
+            // After the live stream ends, append a synthetic `done` so the
+            // browser's reader receives an EOF promptly.
+            let done = stream::iter(std::iter::once(Ok(Event::default()
+                .event("done")
+                .data("{\"type\":\"done\"}"))));
+            replay_stream.chain(mapped).chain(done).boxed()
         } else if is_terminal {
             // emit a synthetic done so the client closes cleanly
             let done = stream::iter(std::iter::once(Ok(Event::default()
                 .event("done")
-                .data("{}"))));
+                .data("{\"type\":\"done\"}"))));
             replay_stream.chain(done).boxed()
         } else {
             replay_stream.boxed()

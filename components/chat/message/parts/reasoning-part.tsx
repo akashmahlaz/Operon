@@ -28,7 +28,7 @@ export function ReasoningPart({ text, streaming, className }: ReasoningPartProps
   if (!text && !streaming) return null;
 
   const header = streaming
-    ? `Thinking${elapsed > 0 ? ` ${elapsed}s` : "..."}`
+    ? `Thinking${elapsed > 0 ? ` ${elapsed}s` : ""}\u2026`
     : `Thought${elapsed > 0 ? ` for ${elapsed}s` : ""}`;
 
   return (
@@ -37,7 +37,14 @@ export function ReasoningPart({ text, streaming, className }: ReasoningPartProps
         onClick={() => setOpen((v) => !v)}
         className="group/reasoning inline-flex items-center gap-1.5 text-[12px] italic leading-none text-muted-foreground/80 hover:text-muted-foreground"
       >
-        <span className="text-primary/70">*</span>
+        {streaming ? (
+          <span
+            aria-hidden
+            className="inline-block size-1.5 rounded-full bg-primary/70 animate-pulse"
+          />
+        ) : (
+          <span className="text-primary/70">*</span>
+        )}
         <span>{header}</span>
         <ChevronRight className={cn("size-3 transition-transform", effectiveOpen && "rotate-90")} />
       </button>

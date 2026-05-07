@@ -51,6 +51,10 @@ type SSEEventType =
   | "warning"
   | "usage"
   | "message-end"
+  | "done"
+  | "run-completed"
+  | "run-failed"
+  | "run-cancelled"
   | "error";
 
 interface SSEEvent {
@@ -471,6 +475,25 @@ export function useStreamEvents({
           });
           onFinished?.(assistantMessageRef.current);
         }
+        // Flip top-level status immediately so the input re-enables even if
+        // the backend keeps the SSE channel open (keepalive pings).
+        streamingRef.current = false;
+        setStatus("idle");
+        break;
+
+      // Synthetic terminal frame from the backend (sent after the live
+      // broadcast has emitted a terminal event). Mirrors `message-end`.
+      case "done":
+      case "run-completed":
+      case "run-failed":
+      case "run-cancelled":
+        if (assistantMessageRef.current) {
+          assistantMessageRef.current.isComplete = true;
+          assistantMessageRef.current.isStreaming = false;
+          setMessages((prev) => upsertAssistantMessage(prev, assistantMessageRef.current!));
+        }
+        streamingRef.current = false;
+        setStatus("idle");
         break;
     }
   }

@@ -66,10 +66,25 @@ export async function operonFetch(path: string, init: RequestInit = {}) {
   if (init.body && !headers.has("Content-Type") && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  return fetch(`${OPERON_API_URL}${path}`, {
+  const res = await fetch(`${OPERON_API_URL}${path}`, {
     ...init,
     headers,
   });
+  // If the backend rejects our token (e.g. server restarted with a new
+  // secret, or token expired), clear the local session and bounce to /login
+  // exactly once. Any in-flight pollers will stop on the redirect.
+  if (res.status === 401 && typeof window !== "undefined") {
+    if (operonToken()) {
+      clearOperonSession();
+      // Avoid redirect loops while already on auth pages.
+      const path = window.location.pathname;
+      if (!path.startsWith("/login") && !path.startsWith("/signup")) {
+        const next = encodeURIComponent(path + window.location.search);
+        window.location.replace(`/login?next=${next}`);
+      }
+    }
+  }
+  return res;
 }
 
 export async function operonJson<T>(path: string, init: RequestInit = {}): Promise<T> {

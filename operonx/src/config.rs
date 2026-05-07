@@ -43,7 +43,7 @@ impl Config {
         let access_token_ttl_seconds = env::var("OPERON_ACCESS_TOKEN_TTL_SECONDS")
             .ok()
             .and_then(|value| value.parse().ok())
-            .unwrap_or(60 * 60);
+            .unwrap_or(60 * 60 * 24 * 30); // 30 days
         let cookie_secure = env::var("OPERON_COOKIE_SECURE")
             .ok()
             .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
