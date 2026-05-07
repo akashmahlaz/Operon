@@ -694,16 +694,17 @@ function AssistantLabel() {
 }
 
 // ---------------------------------------------------------------------------
-// UserMessage — shows user's text in a bubble
+// UserMessage — Copilot-style: subtle bg, full width, no big bubble
 // ---------------------------------------------------------------------------
 function UserMessage({ text }: { text: string }) {
   return (
-    <div className="group flex flex-col items-end gap-1.5 py-2">
-      <div className="max-w-[82%] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
-        <p className="whitespace-pre-wrap wrap-break-word text-[14.5px] leading-relaxed">
-          {text}
-        </p>
+    <div className="group/user mt-4 mb-2 rounded-lg border border-border/40 bg-muted/30 px-3.5 py-2.5">
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+        You
       </div>
+      <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed text-foreground">
+        {text}
+      </p>
     </div>
   );
 }
@@ -741,14 +742,16 @@ function CopyButton({ text }: { text: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// StreamingAssistantMessage — ordered interleaved rendering (not bucketed)
+// StreamingAssistantMessage — Copilot-style: full width, no avatar, no label
 // ---------------------------------------------------------------------------
 function StreamingAssistantMessage({
   message,
   isLoading,
+  onRegenerate,
 }: {
   message: StreamingMessage;
   isLoading: boolean;
+  onRegenerate?: () => void;
 }) {
   const isStreamingThis = isLoading && !message.isComplete;
   const segments = buildSegments(message.orderedParts);
@@ -768,84 +771,117 @@ function StreamingAssistantMessage({
     .map((e) => e.text)
     .join("");
 
+  // Working indicator: streaming, but no text yet
+  const hasText = segments.some((s) => s.kind === "text" && s.events.some((e) => e.text));
+  const showWorking = isStreamingThis && !hasText;
+
   return (
-    <div className="group flex max-w-3xl items-start gap-2.5 py-3">
-      <AssistantAvatar />
-      <div className="min-w-0 flex-1">
-        <AssistantLabel />
-
-        <div className="space-y-2">
-          {segments.map((seg, i) => {
-            const isLastSeg = isStreamingThis && i === segments.length - 1;
-
-            if (seg.kind === "reasoning") {
-              return (
-                <ReasoningBlock
-                  key={i}
-                  reasoningEvents={seg.events}
-                  isStreaming={isLastSeg}
-                  activeToolNames={activeToolNames.length > 0 ? activeToolNames : undefined}
-                />
-              );
-            }
-            if (seg.kind === "tools") {
-              return <ToolCallList key={i} events={seg.tools} />;
-            }
-            if (seg.kind === "text") {
-              const text = seg.events.map((e) => e.text).join("");
-              return text ? (
-                <StreamingText key={i} text={text} isStreaming={isLastSeg} />
-              ) : null;
-            }
-            if (seg.kind === "sources") {
-              return <SourceUrlPills key={i} urls={seg.urls} />;
-            }
-            if (seg.kind === "references") {
-              return <ReferencePills key={i} refs={seg.refs} />;
-            }
-            if (seg.kind === "progress") {
-              return <ProgressLine key={i} ev={seg.ev} />;
-            }
-            if (seg.kind === "anchor") {
-              return <AnchorChip key={i} ev={seg.ev} />;
-            }
-            if (seg.kind === "warning") {
-              return <WarningBanner key={i} ev={seg.ev} />;
-            }
-            if (seg.kind === "codeblock-uri") {
-              return <CodeblockUriHeader key={i} ev={seg.ev} />;
-            }
-            if (seg.kind === "text-edit") {
-              return <TextEditCard key={i} ev={seg.ev} />;
-            }
-            if (seg.kind === "confirmation") {
-              return <ConfirmationCard key={i} ev={seg.ev} />;
-            }
-            if (seg.kind === "command-button") {
-              return <CommandButton key={i} ev={seg.ev} />;
-            }
-            if (seg.kind === "usage") {
-              return <UsageBadge key={i} ev={seg.ev} />;
-            }
-            return null;
-          })}
-
-          {/* Waiting spinner when no content has arrived yet */}
-          {isStreamingThis && segments.length === 0 && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <StreamingDots />
-              <span className="italic">Generating…</span>
-            </div>
-          )}
-
-          {/* Copy button — only when message is complete */}
-          {allText && !isStreamingThis && (
-            <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-              <CopyButton text={allText} />
-            </div>
-          )}
+    <div className="group/msg py-3">
+      {showWorking && (
+        <div className="mb-2 flex items-center gap-2 text-[12px] text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" />
+          <span>{activeToolNames.length > 0 ? activeToolNames[0] : "Working"}…</span>
         </div>
+      )}
+
+      <div className="space-y-2">
+        {segments.map((seg, i) => {
+          const isLastSeg = isStreamingThis && i === segments.length - 1;
+
+          if (seg.kind === "reasoning") {
+            return (
+              <ReasoningBlock
+                key={i}
+                reasoningEvents={seg.events}
+                isStreaming={isLastSeg}
+                activeToolNames={activeToolNames.length > 0 ? activeToolNames : undefined}
+              />
+            );
+          }
+          if (seg.kind === "tools") {
+            return <ToolCallList key={i} events={seg.tools} />;
+          }
+          if (seg.kind === "text") {
+            const text = seg.events.map((e) => e.text).join("");
+            return text ? (
+              <StreamingText key={i} text={text} isStreaming={isLastSeg} />
+            ) : null;
+          }
+          if (seg.kind === "sources") {
+            return <SourceUrlPills key={i} urls={seg.urls} />;
+          }
+          if (seg.kind === "references") {
+            return <ReferencePills key={i} refs={seg.refs} />;
+          }
+          if (seg.kind === "progress") {
+            return <ProgressLine key={i} ev={seg.ev} />;
+          }
+          if (seg.kind === "anchor") {
+            return <AnchorChip key={i} ev={seg.ev} />;
+          }
+          if (seg.kind === "warning") {
+            return <WarningBanner key={i} ev={seg.ev} />;
+          }
+          if (seg.kind === "codeblock-uri") {
+            return <CodeblockUriHeader key={i} ev={seg.ev} />;
+          }
+          if (seg.kind === "text-edit") {
+            return <TextEditCard key={i} ev={seg.ev} />;
+          }
+          if (seg.kind === "confirmation") {
+            return <ConfirmationCard key={i} ev={seg.ev} />;
+          }
+          if (seg.kind === "command-button") {
+            return <CommandButton key={i} ev={seg.ev} />;
+          }
+          if (seg.kind === "usage") {
+            return <UsageBadge key={i} ev={seg.ev} />;
+          }
+          return null;
+        })}
+
+        {/* Per-message toolbar — Copilot-style: copy / regenerate, hover only */}
+        {allText && !isStreamingThis && (
+          <MessageToolbar text={allText} onRegenerate={onRegenerate} />
+        )}
       </div>
+    </div>
+  );
+}
+
+// Per-message hover toolbar (Copilot-parity)
+function MessageToolbar({
+  text,
+  onRegenerate,
+}: {
+  text: string;
+  onRegenerate?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100">
+      <button
+        onClick={() => {
+          void navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+        title="Copy"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      </button>
+      {onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          title="Regenerate"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M2 8a6 6 0 1 0 1.76-4.24M2 3v3.5h3.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -882,11 +918,8 @@ export function StreamingChatMessageList({
   messages: StreamingMessage[];
   isLoading: boolean;
 }) {
-  const lastMsg = messages[messages.length - 1];
-  const isStreaming = isLoading && lastMsg?.role === "user";
-
   return (
-    <div className="flex flex-col gap-2 pb-4">
+    <div className="flex flex-col gap-1 pb-4">
       {messages.map((message) => (
         <ChatMessageRow
           key={message.id}
@@ -894,28 +927,6 @@ export function StreamingChatMessageList({
           isLoading={isLoading}
         />
       ))}
-
-      {isStreaming && (
-        <PendingStreamingMessage />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// PendingStreamingMessage — shown before any response arrives
-// ---------------------------------------------------------------------------
-function PendingStreamingMessage() {
-  return (
-    <div className="flex max-w-3xl items-start gap-2.5 py-3">
-      <AssistantAvatar />
-      <div className="min-w-0 flex-1">
-        <AssistantLabel />
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <StreamingDots />
-          <span className="italic">Thinking…</span>
-        </div>
-      </div>
     </div>
   );
 }
