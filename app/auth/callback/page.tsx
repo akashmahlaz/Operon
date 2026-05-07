@@ -15,10 +15,17 @@ export default function RustAuthCallbackPage() {
       router.replace("/login?error=OAuthCallback");
       return;
     }
+    const name = params.get("name");
     const auth: OperonAuthResponse = {
       access_token: token,
       expires_at: expiresAt,
-      user: {},
+      user: {
+        id: params.get("user_id") ?? undefined,
+        email: params.get("email"),
+        name,
+        display_name: name,
+        image: params.get("image"),
+      },
     };
     saveOperonSession(auth);
     router.replace("/dashboard/coding");

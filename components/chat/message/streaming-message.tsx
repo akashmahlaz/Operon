@@ -735,17 +735,16 @@ function AssistantLabel() {
 }
 
 // ---------------------------------------------------------------------------
-// UserMessage — Copilot-style: subtle bg, full width, no big bubble
+// UserMessage — right-aligned bubble (no label)
 // ---------------------------------------------------------------------------
 function UserMessage({ text }: { text: string }) {
   return (
-    <div className="group/user mt-4 mb-2 rounded-lg border border-border/40 bg-muted/30 px-3.5 py-2.5">
-      <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-        You
+    <div className="group/user mt-4 mb-2 flex justify-end">
+      <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-muted/70 px-4 py-2.5">
+        <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed text-foreground">
+          {text}
+        </p>
       </div>
-      <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed text-foreground">
-        {text}
-      </p>
     </div>
   );
 }

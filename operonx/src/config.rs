@@ -17,6 +17,8 @@ pub struct Config {
     pub internal_secret: Option<String>,
     pub google_client_id: Option<String>,
     pub google_client_secret: Option<String>,
+    pub github_client_id: Option<String>,
+    pub github_client_secret: Option<String>,
     pub oauth_redirect_base: String,
 }
 
@@ -60,6 +62,8 @@ impl Config {
             });
         let google_client_id = env::var("GOOGLE_CLIENT_ID").ok().filter(|v| !v.is_empty());
         let google_client_secret = env::var("GOOGLE_CLIENT_SECRET").ok().filter(|v| !v.is_empty());
+        let github_client_id = env::var("GITHUB_CLIENT_ID").ok().filter(|v| !v.is_empty());
+        let github_client_secret = env::var("GITHUB_CLIENT_SECRET").ok().filter(|v| !v.is_empty());
         let oauth_redirect_base = env::var("OPERON_OAUTH_REDIRECT_BASE")
             .unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
 
@@ -77,6 +81,8 @@ impl Config {
             internal_secret,
             google_client_id,
             google_client_secret,
+            github_client_id,
+            github_client_secret,
             oauth_redirect_base,
         })
     }

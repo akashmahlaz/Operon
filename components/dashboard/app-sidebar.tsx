@@ -24,7 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { OperonMark } from "@/components/brand";
@@ -157,6 +157,7 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton size="lg" className="rounded-lg data-[state=open]:bg-sidebar-accent">
                   <Avatar className="h-7 w-7 rounded-md">
+                    {currentUser?.image ? <AvatarImage src={currentUser.image} alt={currentUser.name ?? currentUser.display_name ?? "User"} /> : null}
                     <AvatarFallback className="rounded-md bg-primary/10 text-xs font-semibold text-primary">
                       {initials}
                     </AvatarFallback>

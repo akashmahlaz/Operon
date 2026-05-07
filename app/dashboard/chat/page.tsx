@@ -97,6 +97,11 @@ interface AttachedFile {
   error?: string;
 }
 
+interface ProviderApiState {
+  profiles?: Array<{ provider: string; models?: string[]; defaultModel?: string }>;
+  defaultModel?: string;
+}
+
 function formatTimeAgo(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
@@ -189,7 +194,10 @@ function ChatPage() {
   } | null>(null);
   const [waConnecting, setWaConnecting] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>("openai:gpt-4o-mini");
+  const [selectedModel, setSelectedModel] = useState<string>("openai/gpt-4o-mini");
+  const [modelOptions, setModelOptions] = useState<PromptModelOption[]>([
+    { value: "openai/gpt-4o-mini", label: "gpt-4o-mini", providerLabel: "OpenAI" },
+  ]);
   const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("auto");
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -200,9 +208,37 @@ function ChatPage() {
     convIdRef.current = conversationId;
   }, [conversationId]);
 
-  const modelOptions: PromptModelOption[] = useMemo(() => [
-    { value: "openai:gpt-4o-mini", label: "gpt-4o-mini", providerLabel: "OpenAI" },
-  ], []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await operonFetch("/providers");
+        if (!response.ok) return;
+        const data = (await response.json()) as ProviderApiState;
+        if (cancelled) return;
+        const connected = (data.profiles ?? []).flatMap((profile) =>
+          (profile.models ?? []).map((model) => ({
+            value: `${profile.provider}/${model}`,
+            label: model,
+            providerLabel: providerLabel(profile.provider),
+          } satisfies PromptModelOption)),
+        );
+        if (connected.length > 0) {
+          setModelOptions(connected);
+          setSelectedModel(
+            data.defaultModel && connected.some((item) => item.value === data.defaultModel)
+              ? data.defaultModel
+              : connected[0].value,
+          );
+        }
+      } catch {
+        // Keep the bundled fallback while the backend is unavailable.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /** Returns true only for providers/models that actually support thinking/reasoning cost control */
   function modelSupportsReasoning(spec: string): boolean {
@@ -1321,7 +1357,6 @@ function ChatPage() {
               conversationId={conversationId}
               onCompacted={() => loadConversations()}
               error={chatError}
-              onContinue={() => handleSend("Continue")}
             />
             <div className="relative flex flex-col rounded-2xl border border-border bg-card shadow-sm transition-all duration-200 focus-within:border-primary/30 focus-within:shadow-md">
               {attachedFiles.length > 0 && (
@@ -1382,7 +1417,16 @@ function ChatPage() {
                   isLoading={isLoading}
                   reasoningLevel={reasoningLevel}
                   reasoningSupported={modelSupportsReasoning(selectedModel)}
-                  onModelChange={setSelectedModel}
+                  onModelChange={(model) => {
+                    setSelectedModel(model);
+                    if (model.includes("/")) {
+                      const provider = model.slice(0, model.indexOf("/"));
+                      void operonFetch("/providers", {
+                        method: "POST",
+                        body: JSON.stringify({ action: "set-default", provider, model }),
+                      });
+                    }
+                  }}
                   onReasoningLevelChange={setReasoningLevel}
                   onAttach={handleFileClick}
                   onChange={(value) => setInput(value)}
@@ -1417,13 +1461,11 @@ function ConversationStatusBar({
   conversationId,
   onCompacted,
   error,
-  onContinue,
 }: {
   messages: StreamingMessage[];
   conversationId: string | null;
   onCompacted?: () => void;
   error?: Error | null;
-  onContinue?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -1497,17 +1539,6 @@ function ConversationStatusBar({
         )}
       </div>
       <div className="flex items-center gap-1.5">
-        {error && onContinue && (
-          <button
-            type="button"
-            onClick={onContinue}
-            className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-0.5 text-[11px] hover:bg-muted"
-            title="Continue from where the agent stopped"
-          >
-            <ChevronRight className="size-3" />
-            Continue
-          </button>
-        )}
         <button
           type="button"
           disabled={busy}
@@ -1521,6 +1552,14 @@ function ConversationStatusBar({
       </div>
     </div>
   );
+}
+
+function providerLabel(provider: string) {
+  return provider
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export default function ChatPageWrapper() {

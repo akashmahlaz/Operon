@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AlertCircle, Check, Copy, ExternalLink, Eye, EyeOff, Loader2, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +42,7 @@ interface ProviderApiState {
 }
 
 export function ProvidersSettings() {
+  const searchParams = useSearchParams();
   const [providers, setProviders] = useState(providerCatalog);
   const [profiles, setProfiles] = useState<AuthProfile[]>([]);
   const [currentModel, setCurrentModel] = useState("minimax/MiniMax-M2.1");
@@ -58,7 +60,22 @@ export function ProvidersSettings() {
       const response = await operonFetch("/providers");
       if (!response.ok) throw new Error("Failed to load providers");
       const data = await response.json() as ProviderApiState;
-      setProviders(data.providers?.length ? data.providers : providerCatalog);
+      const profileByProvider = new Map(data.profiles.map((profile) => [profile.provider, profile]));
+      const baseProviders = data.providers?.length ? data.providers : providerCatalog;
+      setProviders(baseProviders.map((provider) => {
+        const profile = profileByProvider.get(provider.id);
+        if (!profile) return provider;
+        const models = profile.models ?? [];
+        return {
+          ...provider,
+          configured: true,
+          tokenRef: profile.tokenRef,
+          updatedAt: profile.updatedAt,
+          models: models.length > 0 ? models : provider.models,
+          modelsFromProfile: models.length > 0,
+          modelsSource: models.length > 0 ? "api" : "unavailable",
+        } satisfies ProviderMeta;
+      }));
       setProfiles(data.profiles);
       setCurrentModel(data.defaultModel || "minimax/MiniMax-M2.1");
       setRecentProviderId(data.recentProviderId || "minimax");
@@ -74,6 +91,13 @@ export function ProvidersSettings() {
       void loadProviders();
     });
   }, []);
+
+  useEffect(() => {
+    const provider = searchParams.get("provider");
+    if (!provider) return;
+    if (provider === "github-copilot") setCopilotOpen(true);
+    else setActiveProviderId(provider);
+  }, [searchParams]);
 
   const visibleGroups = useMemo(() => {
     const query = search.trim().toLowerCase();

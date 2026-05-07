@@ -1,276 +1,137 @@
 ﻿"use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Code2, Loader2, Plus, FolderOpen } from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Check, GitBranch, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { StreamingChatMessageList } from "@/components/chat/message/streaming-message";
-import { CopilotComposer } from "@/components/chat/composer/copilot-composer";
-import { useStreamEvents } from "@/hooks/use-stream-events";
-import type { StreamingMessage } from "@/hooks/use-stream-events/types";
-import { hydrateMessageParts } from "@/lib/chat/hydrate-message-parts";
 import { toast } from "sonner";
-import { operonFetch } from "@/lib/operon-api";
+import { operonFetch, operonToken, OPERON_API_URL } from "@/lib/operon-api";
 
-interface ConversationDetail {
-  _id: string;
-  title: string;
-  channel: string;
-  createdAt: string;
-  updatedAt: string;
-  messages: Array<{
-    _id: string;
-    role: "user" | "assistant" | "system" | "tool";
-    content: string;
-    parts?: unknown[];
-    createdAt: string;
-  }>;
+interface GithubStatus {
+  connected: boolean;
+  login?: string | null;
 }
 
 function CodingPageInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const urlId = searchParams.get("id");
-
-  const [conversationId, setConversationId] = useState<string | null>(urlId);
-  const [hydrating, setHydrating] = useState<boolean>(Boolean(urlId));
-  const [input, setInput] = useState("");
-  const [model, setModel] = useState("gpt-4o-mini");
-  const [toolsEnabled, setToolsEnabled] = useState(true);
-  const ensuredRef = useRef(false);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  const {
-    messages,
-    sendMessage,
-    status,
-    stop,
-    setMessages,
-    error,
-  } = useStreamEvents({
-    api: "/agent/runs",
-    conversationId,
-    onResponse: (res) => {
-      const cid = res.headers.get("X-Conversation-Id");
-      if (cid && cid !== conversationId) {
-        setConversationId(cid);
-        router.replace(`/dashboard/coding?id=${cid}`);
-      }
-    },
-  });
-
-  const isLoading = status === "submitted" || status === "streaming";
+  const [status, setStatus] = useState<GithubStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
-    if (error) toast.error(error.message);
-  }, [error]);
+    if (searchParams.get("connected") === "github") {
+      toast.success("GitHub connected");
+    } else if (searchParams.get("error")) {
+      toast.error(`GitHub connection failed: ${searchParams.get("error")}`);
+    }
+  }, [searchParams]);
 
-  // Ensure we have a conversation id; the operonx runtime auto-creates one
-  // on the first POST /api/coding, so we don't need to pre-create here.
-  // We just leave conversationId null until the first send completes.
   useEffect(() => {
-    if (ensuredRef.current) return;
-    ensuredRef.current = true;
-    if (urlId) return; // existing session — handled by hydration effect
-    // No-op: the conversation id is returned in the X-Conversation-Id header
-    // of the first /api/coding POST, captured below in submit().
-  }, [urlId]);
-
-  // Hydrate previous messages when ?id= present.
-  useEffect(() => {
-    if (!urlId) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await operonFetch(`/agent/conversations/${urlId}`);
-        if (!res.ok) {
-          if (!cancelled) setHydrating(false);
-          return;
-        }
-        const data = (await res.json()) as ConversationDetail;
-        if (cancelled) return;
-        const hydrated: StreamingMessage[] = data.messages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({
-            id: m._id,
-            role: m.role === "user" ? "user" : "assistant",
-            orderedParts: hydrateMessageParts(
-              m._id,
-              Array.isArray(m.parts) ? (m.parts as unknown[]) : undefined,
-              m.content ?? "",
-            ),
-            isComplete: true,
-            isStreaming: false,
-          }));
-        setMessages(hydrated);
+        const res = await operonFetch("/integrations/github/status");
+        if (!res.ok) throw new Error("status failed");
+        const data = (await res.json()) as GithubStatus;
+        if (!cancelled) setStatus(data);
+      } catch {
+        if (!cancelled) setStatus({ connected: false });
       } finally {
-        if (!cancelled) setHydrating(false);
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [urlId, setMessages]);
+  }, [searchParams]);
 
-  // Auto-scroll on new content.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [messages, isLoading]);
-
-  const submit = useCallback(
-    (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed || isLoading) return;
-      // Built-in slash commands handled client-side.
-      if (trimmed === "/new") {
-        newSessionLocal();
-        setInput("");
-        return;
-      }
-      if (trimmed === "/clear") {
-        setMessages([]);
-        setInput("");
-        return;
-      }
-      sendMessage(trimmed, { conversationId, channel: "coding", modelSpec: model });
-      setInput("");
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [input, isLoading, conversationId, sendMessage, model]
-  );
-
-  const newSessionLocal = useCallback(() => {
-    setMessages([]);
-    setConversationId(null);
-    ensuredRef.current = false;
-    router.replace(`/dashboard/coding`);
-  }, [router, setMessages]);
-
-  const newSession = newSessionLocal;
+  function connectGithub() {
+    setConnecting(true);
+    const token = operonToken();
+    if (!token) {
+      toast.error("Sign in required");
+      setConnecting(false);
+      return;
+    }
+    window.location.href = `${OPERON_API_URL}/auth/oauth/github?token=${encodeURIComponent(token)}`;
+  }
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <Code2 className="size-4" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold leading-tight">Coding Session</span>
-            <span className="text-[11px] text-muted-foreground leading-tight">
-              {conversationId ? (
-                <span className="font-mono">workspaces/{conversationId.slice(0, 8)}…</span>
-              ) : (
-                "starting…"
-              )}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {conversationId && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => {
-                    void navigator.clipboard
-                      .writeText(`./workspaces/${conversationId}`)
-                      .then(() => toast.success("Workspace path copied"));
-                  }}
-                >
-                  <FolderOpen className="size-3.5" />
-                  <span className="text-xs">Copy path</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                Copy <span className="font-mono">./workspaces/{conversationId}</span>
-              </TooltipContent>
-            </Tooltip>
-          )}
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={newSession}>
-            <Plus className="size-3.5" />
-            <span className="text-xs">New session</span>
-          </Button>
+      <div className="flex items-center justify-between border-b border-border/40 px-6 py-4">
+        <div>
+          <h1 className="text-base font-semibold">Coding</h1>
+          <p className="text-xs text-muted-foreground">
+            Connect the tools your coding agent will operate on.
+          </p>
         </div>
       </div>
 
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="mx-auto max-w-3xl">
-          {hydrating ? (
-            <div className="flex items-center justify-center py-16 text-muted-foreground">
-              <Loader2 className="mr-2 size-4 animate-spin" />
-              <span className="text-sm">Loading session…</span>
-            </div>
-          ) : messages.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <StreamingChatMessageList messages={messages} isLoading={isLoading} />
-          )}
-        </div>
-      </div>
-
-      {/* Composer */}
-      <div className="border-t border-border/40 bg-background/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto max-w-3xl">
-          <CopilotComposer
-            value={input}
-            onChange={setInput}
-            onSubmit={submit}
-            onStop={stop}
-            isStreaming={isLoading}
-            disabled={hydrating}
-            placeholder={
-              conversationId
-                ? "Tell the coding agent what to build, fix, or explore…"
-                : "Describe what you want the agent to build…"
-            }
-            model={model}
-            models={["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]}
-            onModelChange={setModel}
-            toolsEnabled={toolsEnabled}
-            onToolsToggle={setToolsEnabled}
-            footerHint={`channel: coding · max 200 steps/turn`}
-          />
+      <div className="flex-1 overflow-y-auto px-6 py-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ConnectorCard
+              icon={<GitBranch className="size-5" />}
+              title="GitHub"
+              description="Connect your GitHub account so the agent can read repositories, branches, issues, and pull requests on your behalf."
+              connected={status?.connected ?? false}
+              connectedLabel={status?.login ? `Connected as ${status.login}` : "Connected"}
+              actionLabel="Connect GitHub"
+              loading={loading || connecting}
+              onAction={connectGithub}
+            />
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function EmptyState() {
-  const examples = [
-    "Build a Next.js todo app with Tailwind and SQLite persistence",
-    "Scaffold a Rust CLI that converts Markdown to HTML using pulldown-cmark",
-    "Create a small Express + TypeScript REST API with Vitest tests",
-    "Initialise a Vite + React + shadcn project and add a working dashboard",
-  ];
+function ConnectorCard({
+  icon,
+  title,
+  description,
+  connected,
+  connectedLabel,
+  actionLabel,
+  loading,
+  onAction,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  connected: boolean;
+  connectedLabel: string;
+  actionLabel: string;
+  loading: boolean;
+  onAction: () => void;
+}) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="mb-3 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
-        <Code2 className="size-6" />
+    <div className="flex min-h-44 flex-col justify-between rounded-xl border border-border bg-card p-5 transition-colors hover:border-border/80">
+      <div>
+        <div className="mb-3 flex size-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+          {icon}
+        </div>
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
       </div>
-      <h2 className="text-lg font-semibold">Start a coding session</h2>
-      <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        The agent runs in an isolated per-conversation workspace and can read,
-        write, patch, search, and execute commands. Long sessions are expected.
-      </p>
-      <div className="mt-6 grid w-full max-w-xl gap-2">
-        {examples.map((ex) => (
-          <div
-            key={ex}
-            className="rounded-lg border border-border/50 bg-card/50 px-3 py-2 text-left text-sm text-muted-foreground"
-          >
-            {ex}
+      <div className="mt-4">
+        {connected ? (
+          <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+            <Check className="size-3.5" />
+            <span>{connectedLabel}</span>
           </div>
-        ))}
+        ) : (
+          <Button size="sm" disabled={loading} onClick={onAction} className="w-full">
+            {loading ? (
+              <>
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" /> Connecting…
+              </>
+            ) : (
+              actionLabel
+            )}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -282,7 +143,7 @@ export default function CodingPage() {
       fallback={
         <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center text-muted-foreground">
           <Loader2 className="mr-2 size-4 animate-spin" />
-          <span className="text-sm">Loading coding workspace…</span>
+          <span className="text-sm">Loading…</span>
         </div>
       }
     >

@@ -69,6 +69,8 @@ pub struct UserResponse {
     id: Uuid,
     email: String,
     display_name: Option<String>,
+    name: Option<String>,
+    image: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -83,6 +85,8 @@ struct GoogleUserInfo {
     email: String,
     #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    picture: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -97,6 +101,7 @@ struct UserRecord {
     id: Uuid,
     email: String,
     display_name: Option<String>,
+    avatar_url: Option<String>,
     password_hash: Option<String>,
 }
 
@@ -110,7 +115,7 @@ pub async fn signup(
     let password_hash = hash_password(&payload.password)?;
 
     let result = sqlx::query(
-        "insert into users (id, email, display_name, password_hash) values ($1, lower($2), $3, $4) returning id, email, display_name, password_hash",
+        "insert into users (id, email, display_name, password_hash) values ($1, lower($2), $3, $4) returning id, email, display_name, avatar_url, password_hash",
     )
     .bind(user_id)
     .bind(payload.email.trim())
@@ -196,15 +201,234 @@ pub async fn google_oauth_callback(
         .map_err(|err| AppError::ServiceUnavailable(format!("google profile: {err}")))?;
 
     validate_email(&profile.email)?;
-    let user = upsert_external_user(&state, &profile.email, profile.name.as_deref()).await?;
+    let user = upsert_external_user(
+        &state,
+        &profile.email,
+        profile.name.as_deref(),
+        profile.picture.as_deref(),
+    )
+    .await?;
     let auth = issue_bearer_token(&state, user)?;
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("token", &auth.access_token)
+        .append_pair("expires_at", &auth.expires_at.to_string())
+        .append_pair("user_id", &auth.user.id.to_string())
+        .append_pair("email", &auth.user.email)
+        .append_pair("name", auth.user.display_name.as_deref().unwrap_or(""))
+        .append_pair("image", auth.user.image.as_deref().unwrap_or(""))
+        .finish();
     let callback = format!(
-        "{}/auth/callback?token={}&expires_at={}",
+        "{}/auth/callback?{}",
         state.config.web_origin.trim_end_matches('/'),
-        auth.access_token,
-        auth.expires_at
+        query,
     );
     Ok(Redirect::temporary(&callback))
+}
+
+// ---------------------------------------------------------------------------
+// GitHub OAuth — links a GitHub account to an already-authenticated user.
+// `state` query param carries a short-lived signed payload {user_id, exp, nonce}.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct GithubOAuthStartQuery {
+    /// Operon JWT — required because the user must already be signed in to
+    /// link a GitHub account to their Operon profile.
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct GithubLinkState {
+    user_id: Uuid,
+    exp: i64,
+}
+
+#[derive(Deserialize)]
+struct GithubUserInfo {
+    id: i64,
+    login: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+}
+
+type GithubClient = oauth2::Client<
+    oauth2::basic::BasicErrorResponse,
+    oauth2::basic::BasicTokenResponse,
+    oauth2::basic::BasicTokenIntrospectionResponse,
+    oauth2::StandardRevocableToken,
+    oauth2::basic::BasicRevocationErrorResponse,
+    EndpointSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointNotSet,
+    EndpointSet,
+>;
+
+fn github_oauth_client(state: &AppState) -> AppResult<GithubClient> {
+    let client_id = state
+        .config
+        .github_client_id
+        .clone()
+        .ok_or_else(|| AppError::ServiceUnavailable("GITHUB_CLIENT_ID not configured".into()))?;
+    let client_secret = state
+        .config
+        .github_client_secret
+        .clone()
+        .ok_or_else(|| AppError::ServiceUnavailable("GITHUB_CLIENT_SECRET not configured".into()))?;
+    let redirect = format!(
+        "{}/auth/oauth/github/callback",
+        state.config.oauth_redirect_base.trim_end_matches('/')
+    );
+    let redirect_url = RedirectUrl::new(redirect).map_err(|_| AppError::Internal)?;
+    Ok(BasicClient::new(ClientId::new(client_id))
+        .set_client_secret(ClientSecret::new(client_secret))
+        .set_auth_uri(
+            AuthUrl::new("https://github.com/login/oauth/authorize".to_owned())
+                .map_err(|_| AppError::Internal)?,
+        )
+        .set_token_uri(
+            TokenUrl::new("https://github.com/login/oauth/access_token".to_owned())
+                .map_err(|_| AppError::Internal)?,
+        )
+        .set_redirect_uri(redirect_url))
+}
+
+fn encode_link_state(secret: &str, user_id: Uuid) -> AppResult<String> {
+    let payload = GithubLinkState {
+        user_id,
+        exp: (Utc::now() + Duration::minutes(10)).timestamp(),
+    };
+    let json = serde_json::to_vec(&payload).map_err(|_| AppError::Internal)?;
+    let payload_b64 = Base64UrlUnpadded::encode_string(&json);
+    let signature = sign(secret, payload_b64.as_bytes())?;
+    Ok(format!("{payload_b64}.{signature}"))
+}
+
+fn decode_link_state(secret: &str, raw: &str) -> AppResult<Uuid> {
+    let (payload_b64, sig) = raw
+        .split_once('.')
+        .ok_or_else(|| AppError::BadRequest("invalid state".into()))?;
+    let expected = sign(secret, payload_b64.as_bytes())?;
+    if expected != sig {
+        return Err(AppError::BadRequest("state signature mismatch".into()));
+    }
+    let json =
+        Base64UrlUnpadded::decode_vec(payload_b64).map_err(|_| AppError::BadRequest("bad state".into()))?;
+    let payload: GithubLinkState =
+        serde_json::from_slice(&json).map_err(|_| AppError::BadRequest("bad state".into()))?;
+    if payload.exp < Utc::now().timestamp() {
+        return Err(AppError::BadRequest("state expired".into()));
+    }
+    Ok(payload.user_id)
+}
+
+pub async fn github_oauth_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<GithubOAuthStartQuery>,
+) -> AppResult<Redirect> {
+    let token = query
+        .token
+        .as_deref()
+        .or_else(|| token_from_headers(&headers))
+        .ok_or(AppError::Unauthorized)?;
+    let user_id = decode_claims_public(&state, token)?;
+    let signed_state = encode_link_state(&state.config.jwt_secret, user_id)?;
+    let client = github_oauth_client(&state)?;
+    let (auth_url, _csrf) = client
+        .authorize_url(|| CsrfToken::new(signed_state.clone()))
+        .add_scope(Scope::new("read:user".to_owned()))
+        .add_scope(Scope::new("user:email".to_owned()))
+        .add_scope(Scope::new("repo".to_owned()))
+        .url();
+    Ok(Redirect::temporary(auth_url.as_str()))
+}
+
+pub async fn github_oauth_callback(
+    State(state): State<AppState>,
+    Query(query): Query<OAuthCallbackQuery>,
+) -> AppResult<Redirect> {
+    let coding_url = format!(
+        "{}/dashboard/coding",
+        state.config.web_origin.trim_end_matches('/')
+    );
+
+    let raw_state = query
+        .state
+        .as_deref()
+        .ok_or_else(|| AppError::BadRequest("missing state".into()))?;
+    let user_id = match decode_link_state(&state.config.jwt_secret, raw_state) {
+        Ok(uid) => uid,
+        Err(_) => return Ok(Redirect::temporary(&format!("{coding_url}?error=invalid_state"))),
+    };
+
+    let client = github_oauth_client(&state)?;
+    let http_client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| AppError::Internal)?;
+    let token = client
+        .exchange_code(AuthorizationCode::new(query.code))
+        .request_async(&http_client)
+        .await
+        .map_err(|err| AppError::ServiceUnavailable(format!("github oauth: {err}")))?;
+    let access_token = token.access_token().secret().clone();
+
+    let profile = reqwest::Client::new()
+        .get("https://api.github.com/user")
+        .header(header::USER_AGENT, "operonx")
+        .header(header::ACCEPT, "application/vnd.github+json")
+        .bearer_auth(&access_token)
+        .send()
+        .await
+        .map_err(|err| AppError::ServiceUnavailable(format!("github user: {err}")))?
+        .json::<GithubUserInfo>()
+        .await
+        .map_err(|err| AppError::ServiceUnavailable(format!("github profile: {err}")))?;
+
+    let scopes: Vec<String> = vec![
+        "read:user".into(),
+        "user:email".into(),
+        "repo".into(),
+    ];
+
+    sqlx::query(
+        "insert into oauth_accounts (id, user_id, provider, provider_account_id, access_token_ciphertext, scopes)
+             values ($1, $2, 'github', $3, $4, $5)
+             on conflict (provider, provider_account_id) do update
+                 set user_id = excluded.user_id,
+                     access_token_ciphertext = excluded.access_token_ciphertext,
+                     scopes = excluded.scopes,
+                     updated_at = now()",
+    )
+    .bind(Uuid::now_v7())
+    .bind(user_id)
+    .bind(profile.id.to_string())
+    .bind(&access_token)
+    .bind(&scopes)
+    .execute(&state.db)
+    .await?;
+
+    // Best-effort: stash the user's GitHub display name on the user row if
+    // they don't have one yet. (No avatar — that comes from Google.)
+    if let Some(ref name) = profile.name {
+        let _ = sqlx::query(
+            "update users set display_name = coalesce(display_name, $1), updated_at = now() where id = $2",
+        )
+        .bind(name)
+        .bind(user_id)
+        .execute(&state.db)
+        .await;
+    }
+    let _ = profile.email; // not stored
+
+    Ok(Redirect::temporary(&format!(
+        "{coding_url}?connected=github&login={}",
+        url::form_urlencoded::byte_serialize(profile.login.as_bytes()).collect::<String>()
+    )))
 }
 
 #[derive(Deserialize)]
@@ -248,7 +472,7 @@ pub async fn internal_exchange(
              on conflict (email) do update
                  set display_name = coalesce(excluded.display_name, users.display_name),
                      updated_at = now()
-             returning id, email, display_name, password_hash",
+             returning id, email, display_name, avatar_url, password_hash",
     )
     .bind(Uuid::now_v7())
     .bind(payload.email.trim())
@@ -287,17 +511,20 @@ async fn upsert_external_user(
     state: &AppState,
     email: &str,
     display_name: Option<&str>,
+    avatar_url: Option<&str>,
 ) -> AppResult<UserRecord> {
     let row = sqlx::query(
-        "insert into users (id, email, display_name) values ($1, lower($2), $3)
+        "insert into users (id, email, display_name, avatar_url) values ($1, lower($2), $3, $4)
              on conflict (email) do update
                  set display_name = coalesce(excluded.display_name, users.display_name),
+                     avatar_url = coalesce(excluded.avatar_url, users.avatar_url),
                      updated_at = now()
-             returning id, email, display_name, password_hash",
+             returning id, email, display_name, avatar_url, password_hash",
     )
     .bind(Uuid::now_v7())
     .bind(email.trim())
     .bind(display_name.map(str::trim).filter(|value| !value.is_empty()))
+    .bind(avatar_url.map(str::trim).filter(|value| !value.is_empty()))
     .fetch_one(&state.db)
     .await?;
     user_from_row(row)
@@ -321,7 +548,7 @@ pub async fn me(
     let token = token_from_headers(&headers).ok_or(AppError::Unauthorized)?;
     let claims = decode_claims(&state, token)?;
 
-    let row = sqlx::query("select id, email, display_name, password_hash from users where id = $1")
+    let row = sqlx::query("select id, email, display_name, avatar_url, password_hash from users where id = $1")
         .bind(claims.sub)
         .fetch_optional(&state.db)
         .await?
@@ -364,7 +591,7 @@ fn verify_password(password_hash: &str, password: &str) -> AppResult<()> {
 
 async fn find_user_by_email(state: &AppState, email: &str) -> AppResult<UserRecord> {
     let row = sqlx::query(
-        "select id, email, display_name, password_hash from users where email = lower($1)",
+        "select id, email, display_name, avatar_url, password_hash from users where email = lower($1)",
     )
     .bind(email.trim())
     .fetch_optional(&state.db)
@@ -379,6 +606,7 @@ fn user_from_row(row: sqlx::postgres::PgRow) -> AppResult<UserRecord> {
         id: row.try_get("id")?,
         email: row.try_get("email")?,
         display_name: row.try_get("display_name")?,
+        avatar_url: row.try_get("avatar_url")?,
         password_hash: row.try_get("password_hash")?,
     })
 }
@@ -440,7 +668,9 @@ fn user_response(user: UserRecord) -> UserResponse {
     UserResponse {
         id: user.id,
         email: user.email,
+        name: user.display_name.clone(),
         display_name: user.display_name,
+        image: user.avatar_url,
     }
 }
 
