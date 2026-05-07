@@ -63,13 +63,18 @@ pub async fn stream_chat(
     tools: &[Value],
 ) -> Result<impl Stream<Item = Result<OpenAiEvent>> + use<>> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
+
+    let mut body = serde_json::json!({
         "model": model,
         "stream": true,
         "messages": messages,
-        "tools": tools,
-        "tool_choice": "auto",
     });
+    // Only include tools/tool_choice when there are actual tools defined.
+    // Sending tool_choice:"auto" with an empty array is rejected by many providers.
+    if !tools.is_empty() {
+        body["tools"] = serde_json::json!(tools);
+        body["tool_choice"] = serde_json::json!("auto");
+    }
 
     let response = client
         .post(&url)
