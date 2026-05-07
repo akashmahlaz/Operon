@@ -34,7 +34,7 @@ use super::{
     events,
     openai::{self, ChatMessage, OpenAiEvent, ToolCall, ToolCallFunction},
     prompt::build_system_message,
-    tools::{self, Workspace},
+    tools::{self, AgentContext, Workspace},
     types::{AgentEvent, RunId, RunStatus},
 };
 
@@ -158,6 +158,7 @@ pub struct RunnerSpec {
     pub openai_api_key: String,
     pub base_url: String,
     pub workspace: Workspace,
+    pub github_token: Option<String>,
     pub initial_user_message: String,
     pub db: Pool<Postgres>,
     pub max_steps: usize,
@@ -195,6 +196,12 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .context("building reqwest client")?;
+
+    let agent_ctx = AgentContext::new(
+        spec.workspace.clone(),
+        client.clone(),
+        spec.github_token.clone(),
+    );
 
     let mut messages: Vec<ChatMessage> = Vec::new();
     messages.push(ChatMessage {
@@ -250,6 +257,8 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
 
         let mut text_started = false;
         let mut accumulated_text = String::new();
+        let mut accumulated_reasoning = String::new();
+        let mut reasoning_id: Option<String> = None;
         let mut tool_call_started: Vec<bool> = Vec::new();
         let mut final_tool_calls: Vec<ToolCall> = Vec::new();
         let mut finish_reason = String::new();
@@ -260,12 +269,31 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             }
             let event = event?;
             match event {
+                OpenAiEvent::ReasoningDelta(delta) => {
+                    let id = match reasoning_id.as_ref() {
+                        Some(id) => id.clone(),
+                        None => {
+                            let id = Uuid::now_v7().to_string();
+                            handle.emit(&events::reasoning_start(&id)).await?;
+                            reasoning_id = Some(id.clone());
+                            id
+                        }
+                    };
+                    accumulated_reasoning.push_str(&delta);
+                    handle.emit(&events::reasoning_delta(&id, &delta)).await?;
+                }
                 OpenAiEvent::TextDelta(delta) => {
+                    if let Some(id) = reasoning_id.take() {
+                        handle.emit(&events::reasoning_end(&id)).await?;
+                    }
                     text_started = true;
                     accumulated_text.push_str(&delta);
                     handle.emit(&events::text_delta(&delta)).await?;
                 }
                 OpenAiEvent::ToolCallBegin { index, id, name } => {
+                    if let Some(rid) = reasoning_id.take() {
+                        handle.emit(&events::reasoning_end(&rid)).await?;
+                    }
                     while tool_call_started.len() <= index {
                         tool_call_started.push(false);
                     }
@@ -296,12 +324,25 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             }
         }
 
+        if let Some(id) = reasoning_id.take() {
+            handle.emit(&events::reasoning_end(&id)).await?;
+        }
         if text_started {
             handle.emit(&events::text_end()).await?;
         }
 
-        // Build UI parts for this assistant turn (text + per-tool-call parts).
+        // Build UI parts for this assistant turn (reasoning + text + per-tool-call parts).
         let mut assistant_parts: Vec<Value> = Vec::new();
+        if !accumulated_reasoning.is_empty() {
+            assistant_parts.push(json!({
+                "type": "reasoning-delta",
+                "text": accumulated_reasoning,
+            }));
+            assistant_parts.push(json!({
+                "type": "reasoning-end",
+                "text": "",
+            }));
+        }
         if !accumulated_text.is_empty() {
             assistant_parts.push(json!({ "type": "text-delta", "text": accumulated_text }));
             assistant_parts.push(json!({ "type": "text-end", "text": "" }));
@@ -365,7 +406,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             handle.emit(&events::tool_call_execute(&tc.id)).await?;
 
             let dispatch_result =
-                tools::dispatch(&spec.workspace, &tc.function.name, &parsed_input).await;
+                tools::dispatch(&agent_ctx, &tc.function.name, &parsed_input).await;
             let (result_value, error_text) = match dispatch_result {
                 Ok(value) => {
                     handle

@@ -32,6 +32,14 @@ pub fn codeblock_uri(uri: &str, is_edit: bool) -> Value {
 
 // ── Reasoning / thinking ───────────────────────────────────────────────────
 
+/// Marks the beginning of a reasoning block. `id` allows chunks to merge.
+pub fn reasoning_start(id: &str) -> Value {
+    json!({
+        "type": "reasoning-start",
+        "data": { "id": id }
+    })
+}
+
 /// Streaming reasoning chunk. `id` allows chunks to merge into one block.
 /// Mirrors `thinkingProgress`.
 pub fn reasoning_delta(id: &str, text: &str) -> Value {

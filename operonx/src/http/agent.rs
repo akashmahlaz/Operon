@@ -164,6 +164,22 @@ pub async fn create_run(
     let workspace = Workspace::new(workspace_root)
         .map_err(|e| AppError::ServiceUnavailable(format!("workspace: {e}")))?;
 
+    // Best-effort GitHub token lookup. If the user hasn't connected GitHub
+    // we leave it None and the GitHub tools return a clear error to the model.
+    let github_token: Option<String> = {
+        use sqlx::Row;
+        let row = sqlx::query(
+            "select access_token_ciphertext from oauth_accounts where user_id = $1 and provider = 'github' order by updated_at desc limit 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+        row.and_then(|r| r.try_get::<Option<String>, _>("access_token_ciphertext").ok().flatten())
+            .filter(|t| !t.is_empty())
+    };
+
     let handle = runner::spawn(RunnerSpec {
         run_id,
         user_id,
@@ -173,6 +189,7 @@ pub async fn create_run(
         openai_api_key: api_key,
         base_url,
         workspace,
+        github_token,
         initial_user_message: prompt.to_owned(),
         db: state.db.clone(),
         max_steps: runner::default_max_steps(),

@@ -1,5 +1,6 @@
 pub mod anthropic;
 pub mod events;
+pub mod github;
 pub mod openai;
 pub mod prompt;
 pub mod registry;

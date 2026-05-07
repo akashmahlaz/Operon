@@ -44,6 +44,9 @@ pub struct ToolCallFunction {
 pub enum OpenAiEvent {
     /// Streaming text delta from the assistant.
     TextDelta(String),
+    /// Streaming reasoning/thinking chunk (e.g. DeepSeek-R1 `reasoning_content`,
+    /// or text inside `<think>...</think>` tags from MiniMax / Qwen-thinking).
+    ReasoningDelta(String),
     /// A tool call has begun (we got an id + name).
     ToolCallBegin { index: usize, id: String, name: String },
     /// Stream finished. The accumulated tool calls (if any) are returned so
@@ -52,6 +55,65 @@ pub enum OpenAiEvent {
         finish_reason: String,
         tool_calls: Vec<ToolCall>,
     },
+}
+
+/// State machine that splits a stream of text chunks into reasoning vs visible
+/// segments based on `<think>...</think>` markers. Handles tag boundaries that
+/// straddle SSE chunks.
+#[derive(Default)]
+pub struct ThinkSplitter {
+    inside: bool,
+    /// Pending characters that might be the start of a `<think>` or `</think>`
+    /// tag (held back until we know for sure).
+    pending: String,
+}
+
+impl ThinkSplitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feed one chunk; returns ordered (is_reasoning, text) segments.
+    pub fn feed(&mut self, chunk: &str) -> Vec<(bool, String)> {
+        let mut input = std::mem::take(&mut self.pending);
+        input.push_str(chunk);
+        let mut out: Vec<(bool, String)> = Vec::new();
+        let mut buf = String::new();
+        let bytes = input.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let rest = &input[i..];
+            let needle = if self.inside { "</think>" } else { "<think>" };
+            if rest.starts_with(needle) {
+                if !buf.is_empty() {
+                    out.push((self.inside, std::mem::take(&mut buf)));
+                }
+                self.inside = !self.inside;
+                i += needle.len();
+                continue;
+            }
+            // If the rest could be the start of either tag, hold it for next chunk.
+            if rest.len() < needle.len() && needle.starts_with(rest) {
+                self.pending = rest.to_owned();
+                break;
+            }
+            // Also hold for the *other* tag possibility (so we don't emit `<` then
+            // discover `<think>` next chunk).
+            let other = if self.inside { "<think>" } else { "</think>" };
+            if rest.len() < other.len() && other.starts_with(rest) {
+                self.pending = rest.to_owned();
+                break;
+            }
+            // Otherwise consume one char.
+            let ch = rest.chars().next().unwrap();
+            buf.push(ch);
+            i += ch.len_utf8();
+        }
+        if !buf.is_empty() {
+            out.push((self.inside, buf));
+        }
+        out
+    }
 }
 
 pub async fn stream_chat(
@@ -103,6 +165,7 @@ fn parse_sse(
         let mut upstream = upstream;
         let mut buffer = String::new();
         let mut tool_call_indices: HashMap<usize, ToolCall> = HashMap::new();
+        let mut splitter = ThinkSplitter::new();
 
         while let Some(chunk) = upstream.next().await {
             let chunk = chunk.context("reading OpenAI stream")?;
@@ -149,12 +212,34 @@ fn parse_sse(
 
                     let delta = choice.get("delta");
 
+                    // DeepSeek-R1 / o1 / Groq reasoning models emit a separate
+                    // `reasoning_content` field (sometimes `reasoning`).
+                    if let Some(text) = delta
+                        .and_then(|d| d.get("reasoning_content").or_else(|| d.get("reasoning")))
+                        .and_then(|c| c.as_str())
+                    {
+                        if !text.is_empty() {
+                            yield OpenAiEvent::ReasoningDelta(text.to_owned());
+                        }
+                    }
+
                     if let Some(text) = delta
                         .and_then(|d| d.get("content"))
                         .and_then(|c| c.as_str())
                     {
                         if !text.is_empty() {
-                            yield OpenAiEvent::TextDelta(text.to_owned());
+                            // MiniMax / Qwen-thinking emit thinking inline as
+                            // <think>...</think> inside content. Split it out.
+                            for (is_reasoning, segment) in splitter.feed(text) {
+                                if segment.is_empty() {
+                                    continue;
+                                }
+                                if is_reasoning {
+                                    yield OpenAiEvent::ReasoningDelta(segment);
+                                } else {
+                                    yield OpenAiEvent::TextDelta(segment);
+                                }
+                            }
                         }
                     }
 

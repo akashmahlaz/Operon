@@ -10,10 +10,13 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use ignore::WalkBuilder;
+use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use similar::TextDiff;
 use tokio::{io::AsyncReadExt, process::Command, time::timeout};
+
+use super::github;
 
 const MAX_FILE_BYTES: usize = 1_000_000;
 const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 300;
@@ -68,6 +71,21 @@ impl Workspace {
             bail!("path escapes workspace: {rel}");
         }
         Ok(joined)
+    }
+}
+
+/// Per-run context handed to every tool dispatch. Carries the workspace plus
+/// any opt-in credentials the user has connected (GitHub, etc.).
+#[derive(Clone)]
+pub struct AgentContext {
+    pub workspace: Workspace,
+    pub http: Client,
+    pub github_token: Option<String>,
+}
+
+impl AgentContext {
+    pub fn new(workspace: Workspace, http: Client, github_token: Option<String>) -> Self {
+        Self { workspace, http, github_token }
     }
 }
 
@@ -149,6 +167,121 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             }),
         ),
+        tool_def(
+            "github_get_status",
+            "Check whether the user has connected GitHub. Returns {connected, login, name, avatar_url} when connected. Always call this first when the user asks anything about GitHub.",
+            json!({ "type": "object", "additionalProperties": false, "properties": {} }),
+        ),
+        tool_def(
+            "github_list_repos",
+            "List the authenticated user's accessible GitHub repositories (most recently updated first).",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "visibility": { "type": "string", "enum": ["all", "public", "private"], "default": "all" },
+                    "per_page":   { "type": "integer", "minimum": 1, "maximum": 100, "default": 30 }
+                }
+            }),
+        ),
+        tool_def(
+            "github_get_repo",
+            "Fetch metadata for a single GitHub repository.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo"],
+                "properties": {
+                    "owner": { "type": "string" },
+                    "repo":  { "type": "string" }
+                }
+            }),
+        ),
+        tool_def(
+            "github_list_contents",
+            "List files and folders at a path inside a GitHub repository (defaults to repo root).",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo"],
+                "properties": {
+                    "owner": { "type": "string" },
+                    "repo":  { "type": "string" },
+                    "path":  { "type": "string", "default": "" },
+                    "ref":   { "type": "string", "description": "Branch, tag, or commit SHA. Defaults to default branch." }
+                }
+            }),
+        ),
+        tool_def(
+            "github_read_file",
+            "Read a single file from a GitHub repository (decoded UTF-8).",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo", "path"],
+                "properties": {
+                    "owner": { "type": "string" },
+                    "repo":  { "type": "string" },
+                    "path":  { "type": "string" },
+                    "ref":   { "type": "string" }
+                }
+            }),
+        ),
+        tool_def(
+            "github_search_code",
+            "Search for code across GitHub. Optionally scope to a single repo (`owner/repo`).",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["query"],
+                "properties": {
+                    "query":    { "type": "string" },
+                    "repo":     { "type": "string", "description": "`owner/repo` to scope the search." },
+                    "per_page": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 }
+                }
+            }),
+        ),
+        tool_def(
+            "github_list_branches",
+            "List branches of a GitHub repository.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo"],
+                "properties": {
+                    "owner": { "type": "string" },
+                    "repo":  { "type": "string" }
+                }
+            }),
+        ),
+        tool_def(
+            "github_list_issues",
+            "List issues for a GitHub repository.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo"],
+                "properties": {
+                    "owner": { "type": "string" },
+                    "repo":  { "type": "string" },
+                    "state": { "type": "string", "enum": ["open", "closed", "all"], "default": "open" }
+                }
+            }),
+        ),
+        tool_def(
+            "github_list_pull_requests",
+            "List pull requests for a GitHub repository.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo"],
+                "properties": {
+                    "owner": { "type": "string" },
+                    "repo":  { "type": "string" },
+                    "state": { "type": "string", "enum": ["open", "closed", "all"], "default": "open" }
+                }
+            }),
+        ),
     ]
 }
 
@@ -163,7 +296,8 @@ fn tool_def(name: &str, description: &str, parameters: Value) -> Value {
     })
 }
 
-pub async fn dispatch(ws: &Workspace, tool_name: &str, input: &Value) -> Result<Value> {
+pub async fn dispatch(ctx: &AgentContext, tool_name: &str, input: &Value) -> Result<Value> {
+    let ws = &ctx.workspace;
     match tool_name {
         "read_file" => read_file(ws, input).await,
         "write_file" => write_file(ws, input).await,
@@ -171,7 +305,112 @@ pub async fn dispatch(ws: &Workspace, tool_name: &str, input: &Value) -> Result<
         "list_dir" => list_dir(ws, input),
         "search" => search(ws, input),
         "exec" => exec(ws, input).await,
+        "github_get_status" => {
+            github::get_status(&ctx.http, ctx.github_token.as_deref()).await
+        }
+        name if name.starts_with("github_") => {
+            let token = ctx.github_token.as_deref().ok_or_else(|| {
+                anyhow!("GitHub is not connected for this user. Ask the user to connect GitHub from Dashboard > Settings > Providers.")
+            })?;
+            dispatch_github(&ctx.http, token, name, input).await
+        }
         other => Err(anyhow!("unknown tool: {other}")),
+    }
+}
+
+async fn dispatch_github(
+    client: &Client,
+    token: &str,
+    tool: &str,
+    input: &Value,
+) -> Result<Value> {
+    #[derive(Deserialize, Default)]
+    struct ListReposArgs {
+        #[serde(default)]
+        visibility: Option<String>,
+        #[serde(default)]
+        per_page: Option<u32>,
+    }
+    #[derive(Deserialize)]
+    struct RepoArgs {
+        owner: String,
+        repo: String,
+    }
+    #[derive(Deserialize)]
+    struct ContentsArgs {
+        owner: String,
+        repo: String,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default, rename = "ref")]
+        git_ref: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct ReadFileArgs {
+        owner: String,
+        repo: String,
+        path: String,
+        #[serde(default, rename = "ref")]
+        git_ref: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct SearchArgs {
+        query: String,
+        #[serde(default)]
+        repo: Option<String>,
+        #[serde(default)]
+        per_page: Option<u32>,
+    }
+    #[derive(Deserialize)]
+    struct StateArgs {
+        owner: String,
+        repo: String,
+        #[serde(default)]
+        state: Option<String>,
+    }
+
+    match tool {
+        "github_list_repos" => {
+            let a: ListReposArgs = serde_json::from_value(input.clone()).unwrap_or_default();
+            github::list_repos(client, token, a.visibility.as_deref(), a.per_page.unwrap_or(30)).await
+        }
+        "github_get_repo" => {
+            let a: RepoArgs = serde_json::from_value(input.clone())?;
+            github::get_repo(client, token, &a.owner, &a.repo).await
+        }
+        "github_list_contents" => {
+            let a: ContentsArgs = serde_json::from_value(input.clone())?;
+            github::list_contents(
+                client,
+                token,
+                &a.owner,
+                &a.repo,
+                a.path.as_deref().unwrap_or(""),
+                a.git_ref.as_deref(),
+            )
+            .await
+        }
+        "github_read_file" => {
+            let a: ReadFileArgs = serde_json::from_value(input.clone())?;
+            github::read_file(client, token, &a.owner, &a.repo, &a.path, a.git_ref.as_deref()).await
+        }
+        "github_search_code" => {
+            let a: SearchArgs = serde_json::from_value(input.clone())?;
+            github::search_code(client, token, &a.query, a.repo.as_deref(), a.per_page.unwrap_or(20)).await
+        }
+        "github_list_branches" => {
+            let a: RepoArgs = serde_json::from_value(input.clone())?;
+            github::list_branches(client, token, &a.owner, &a.repo).await
+        }
+        "github_list_issues" => {
+            let a: StateArgs = serde_json::from_value(input.clone())?;
+            github::list_issues(client, token, &a.owner, &a.repo, a.state.as_deref()).await
+        }
+        "github_list_pull_requests" => {
+            let a: StateArgs = serde_json::from_value(input.clone())?;
+            github::list_pull_requests(client, token, &a.owner, &a.repo, a.state.as_deref()).await
+        }
+        other => Err(anyhow!("unknown github tool: {other}")),
     }
 }
 

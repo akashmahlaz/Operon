@@ -193,6 +193,8 @@ fn parse_anthropic_sse(
                             tool_blocks.insert(index, (id.clone(), name.clone(), String::new()));
                             yield OpenAiEvent::ToolCallBegin { index, id, name };
                         }
+                        // `thinking` / `redacted_thinking` blocks need no start event;
+                        // the runner emits reasoning-start on first ReasoningDelta.
                     }
 
                     "content_block_delta" => {
@@ -204,6 +206,12 @@ fn parse_anthropic_sse(
                             if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
                                 if !text.is_empty() {
                                     yield OpenAiEvent::TextDelta(text.to_owned());
+                                }
+                            }
+                        } else if delta_type == "thinking_delta" {
+                            if let Some(text) = delta.get("thinking").and_then(|v| v.as_str()) {
+                                if !text.is_empty() {
+                                    yield OpenAiEvent::ReasoningDelta(text.to_owned());
                                 }
                             }
                         } else if delta_type == "input_json_delta" {
