@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { ProvidersSettings } from "@/components/dashboard/settings/providers-settings";
 
 export default function ProvidersSettingsPage() {
-  return <ProvidersSettings />;
+  return (
+    <Suspense fallback={null}>
+      <ProvidersSettings />
+    </Suspense>
+  );
 }

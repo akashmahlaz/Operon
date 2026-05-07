@@ -219,6 +219,11 @@ export function getToolLabel(toolName: string, args?: Record<string, unknown>) {
   return describeTool(toolName, args);
 }
 
+function isRawToolMessage(message: string | undefined, toolName: string): boolean {
+  if (!message) return false;
+  return message.includes(toolName) || message.includes(`\`${toolName}\``);
+}
+
 function ToolIcon({
   toolName,
   state,
@@ -228,7 +233,7 @@ function ToolIcon({
   state: ToolCallPart["state"];
   className?: string;
 }) {
-  const pending = ["calling", "input-streaming", "input-available"].includes(state);
+  const pending = ["calling", "input-streaming", "input-available", "executing"].includes(state);
   const error = state === "error" || state === "output-error";
 
   if (pending) {
@@ -256,7 +261,17 @@ function formatJson(v: unknown): string {
 export function ToolPart({ tool }: { tool: ToolCallPart }) {
   const [open, setOpen] = useState(false);
   const error = tool.state === "error" || tool.state === "output-error";
-  const label = describeTool(tool.toolName, tool.args);
+  const isPending = ["calling", "input-streaming", "input-available", "executing"].includes(tool.state);
+  const fallbackLabel = describeTool(tool.toolName, tool.args);
+  const invocationMessage = isRawToolMessage(tool.invocationMessage, tool.toolName)
+    ? undefined
+    : tool.invocationMessage;
+  const pastTenseMessage = isRawToolMessage(tool.pastTenseMessage, tool.toolName)
+    ? undefined
+    : tool.pastTenseMessage;
+  const label = isPending
+    ? invocationMessage ?? fallbackLabel
+    : pastTenseMessage ?? invocationMessage ?? fallbackLabel;
   const hasDetails =
     (tool.args && Object.keys(tool.args).length > 0) || tool.result != null;
 

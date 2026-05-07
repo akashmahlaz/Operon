@@ -8,7 +8,7 @@ import type { ChatDisplayMessage, ParsedAttachment } from "@/components/chat/mes
 import { FilePartList } from "@/components/chat/message/parts/file-part";
 import { ReasoningPart } from "@/components/chat/message/parts/reasoning-part";
 import { TextPart } from "@/components/chat/message/parts/text-part";
-import { getToolLabel, ToolPartList } from "@/components/chat/message/parts/tool-part";
+import { ToolPartList } from "@/components/chat/message/parts/tool-part";
 
 const ATTACHMENT_RE = /\[(Image|File):\s*([^\]]+)\]\(([^)]+)\)/g;
 
@@ -116,15 +116,7 @@ function UserMessage({ message }: { message: ChatDisplayMessage }) {
 }
 
 function AssistantMessage({ message, isLast, isLoading }: { message: ChatDisplayMessage; isLast: boolean; isLoading: boolean }) {
-  const hasToolCalls = message.toolCalls.length > 0;
-  const derivedThinking =
-    !message.thinking && hasToolCalls
-      ? message.toolCalls
-          .filter((toolCall) => ["calling", "input-streaming", "input-available"].includes(toolCall.state))
-          .map((toolCall) => getToolLabel(toolCall.toolName))
-          .join(" | ")
-      : undefined;
-  const reasoningText = message.thinking || (derivedThinking ? `Working on: ${derivedThinking}` : "");
+  const reasoningText = message.thinking || "";
   const isStreamingThis = isLoading && isLast;
   const showWaitingForText = isStreamingThis && !message.content;
 

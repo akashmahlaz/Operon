@@ -207,6 +207,9 @@ export interface ToolCallPart {
     | "output-error";
   args?: Record<string, unknown>;
   result?: unknown;
+  errorText?: string;
+  invocationMessage?: string;
+  pastTenseMessage?: string;
 }
 
 // Tool state helpers

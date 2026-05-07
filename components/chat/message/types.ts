@@ -1,9 +1,12 @@
 export interface ToolCallPart {
   type: "tool-invocation";
   toolName: string;
-  state: "calling" | "result" | "error" | "input-streaming" | "input-available" | "output-available" | "output-error";
+  state: "calling" | "result" | "error" | "input-streaming" | "input-available" | "executing" | "output-available" | "output-error";
   args?: Record<string, unknown>;
   result?: unknown;
+  errorText?: string;
+  invocationMessage?: string;
+  pastTenseMessage?: string;
 }
 
 export interface ChatDisplayMessage {

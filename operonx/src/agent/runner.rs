@@ -54,6 +54,18 @@ fn tool_messages(name: &str, args: &Value) -> (String, String) {
     } else {
         format!(" `{}`", target)
     };
+    let owner = args.get("owner").and_then(|v| v.as_str()).unwrap_or("");
+    let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("");
+    let repo_target = if owner.is_empty() || repo.is_empty() {
+        String::new()
+    } else {
+        format!(" `{}/{}`", owner, repo)
+    };
+    let repo_path_target = if owner.is_empty() || repo.is_empty() || target.is_empty() {
+        repo_target.clone()
+    } else {
+        format!(" `{}/{}/{}`", owner, repo, target)
+    };
     match name {
         "read_file" => (
             format!("Reading{}", target_md),
@@ -79,11 +91,65 @@ fn tool_messages(name: &str, args: &Value) -> (String, String) {
             format!("Running{}", target_md),
             format!("Ran{}", target_md),
         ),
+        "github_get_status" => (
+            "Checking GitHub connection".to_owned(),
+            "Checked GitHub connection".to_owned(),
+        ),
+        "github_list_repos" => (
+            "Listing your repositories".to_owned(),
+            "Listed your repositories".to_owned(),
+        ),
+        "github_get_repo" => (
+            format!("Reading{}", repo_target),
+            format!("Read{}", repo_target),
+        ),
+        "github_list_contents" => (
+            format!("Listing{}", repo_path_target),
+            format!("Listed{}", repo_path_target),
+        ),
+        "github_read_file" => (
+            format!("Reading{}", repo_path_target),
+            format!("Read{}", repo_path_target),
+        ),
+        "github_search_code" => (
+            format!("Searching GitHub code{}", target_md),
+            format!("Searched GitHub code{}", target_md),
+        ),
+        "github_list_branches" => (
+            format!("Listing branches{}", repo_target),
+            format!("Listed branches{}", repo_target),
+        ),
+        "github_list_issues" => (
+            format!("Listing issues{}", repo_target),
+            format!("Listed issues{}", repo_target),
+        ),
+        "github_list_pull_requests" => (
+            format!("Listing pull requests{}", repo_target),
+            format!("Listed pull requests{}", repo_target),
+        ),
         other => (
             format!("Running `{}`", other),
             format!("Ran `{}`", other),
         ),
     }
+}
+
+fn normalize_tool_arguments(arguments: &str) -> Value {
+    let trimmed = arguments.trim();
+    if trimmed.is_empty() {
+        return json!({});
+    }
+
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(value) if value.is_object() => value,
+        Ok(_) | Err(_) => json!({}),
+    }
+}
+
+fn canonical_tool_call(tool_call: &ToolCall) -> ToolCall {
+    let mut normalized = tool_call.clone();
+    normalized.function.arguments = normalize_tool_arguments(&tool_call.function.arguments).to_string();
+    normalized
 }
 
 const BROADCAST_CAPACITY: usize = 1024;
@@ -348,6 +414,11 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             assistant_parts.push(json!({ "type": "text-end", "text": "" }));
         }
 
+        let final_tool_calls: Vec<ToolCall> = final_tool_calls
+            .iter()
+            .map(canonical_tool_call)
+            .collect();
+
         let assistant_message = ChatMessage {
             role: "assistant".to_owned(),
             content: if accumulated_text.is_empty() {
@@ -388,8 +459,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             if handle.cancel.is_cancelled() {
                 anyhow::bail!("run cancelled");
             }
-            let parsed_input: Value =
-                serde_json::from_str(&tc.function.arguments).unwrap_or(json!({}));
+            let parsed_input: Value = normalize_tool_arguments(&tc.function.arguments);
             let (invocation, past_tense) = tool_messages(&tc.function.name, &parsed_input);
             // Update the card with a richer invocation message now that we
             // have the parsed args.

@@ -276,7 +276,7 @@ export function useStreamEvents({
         appendPart({
           id: nextId(),
           type: "reasoning-end",
-          text: reasoningTextRef.current,
+          text: "",
         } satisfies ReasoningPartEvent);
         break;
 

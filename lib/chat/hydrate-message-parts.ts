@@ -56,6 +56,8 @@ export function hydrateMessageParts(
           args: raw.args && typeof raw.args === "object" ? (raw.args as Record<string, unknown>) : undefined,
           result: raw.result,
           errorText: typeof raw.errorText === "string" ? raw.errorText : undefined,
+          invocationMessage: typeof raw.invocationMessage === "string" ? raw.invocationMessage : undefined,
+          pastTenseMessage: typeof raw.pastTenseMessage === "string" ? raw.pastTenseMessage : undefined,
         }];
       }
       if (type === "source-url") {

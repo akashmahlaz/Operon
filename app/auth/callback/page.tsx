@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
+import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { saveOperonSession, type OperonAuthResponse } from "@/lib/operon-api";
 
-export default function RustAuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const params = useSearchParams();
 
@@ -35,5 +36,19 @@ export default function RustAuthCallbackPage() {
     <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
       Signing you in...
     </div>
+  );
+}
+
+export default function RustAuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={(
+        <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+          Signing you in...
+        </div>
+      )}
+    >
+      <AuthCallbackContent />
+    </Suspense>
   );
 }

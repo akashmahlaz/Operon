@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { describeTool } from "@/components/chat/message/parts/tool-part";
 import type {
   StreamingMessage,
   StreamPart,
@@ -21,7 +22,7 @@ import type {
   WarningEvent,
   UsageEvent,
 } from "@/hooks/use-stream-events/types";
-import { getToolLabel, TOOL_STATE_LABELS } from "@/hooks/use-stream-events/types";
+import { TOOL_STATE_LABELS } from "@/hooks/use-stream-events/types";
 import {
   AlertCircle,
   AlertTriangle,
@@ -30,14 +31,66 @@ import {
   Copy,
   ExternalLink,
   FileCode2,
+  FolderOpen,
   GitBranch,
+  GitMerge,
+  GitPullRequest,
+  Globe,
+  Image as ImageIcon,
   Loader2,
   MessageSquareText,
+  Mic,
   PencilLine,
   Search,
+  Sparkles,
+  Terminal,
+  Workflow,
   ChevronRight,
   FileText,
 } from "lucide-react";
+
+const TOOL_ICONS: Record<string, typeof FileText> = {
+  read_file: FileText,
+  workspace_file_read: FileText,
+  list_dir: FolderOpen,
+  workspace_list: FolderOpen,
+  search: Search,
+  grep_search: Search,
+  workspace_grep: Search,
+  exec: Terminal,
+  run_command: Terminal,
+  apply_patch: PencilLine,
+  write_file: PencilLine,
+  workspace_file_write: PencilLine,
+  tavily_search: Globe,
+  web_search: Globe,
+  web_request: Globe,
+  memory_search: Sparkles,
+  memory_remember: Sparkles,
+  memory_forget: Sparkles,
+  spawn_subagent: Workflow,
+  discover_skills: Workflow,
+  generate_image: ImageIcon,
+  generate_video: ImageIcon,
+  text_to_speech: Mic,
+  github_get_status: GitBranch,
+  github_list_repos: GitBranch,
+  github_get_repo: GitBranch,
+  github_list_contents: FolderOpen,
+  github_read_file: FileText,
+  github_write_file: PencilLine,
+  github_search_code: Search,
+  github_list_branches: GitBranch,
+  github_create_branch: GitBranch,
+  github_list_issues: MessageSquareText,
+  github_create_issue: MessageSquareText,
+  github_list_prs: GitPullRequest,
+  github_list_pull_requests: GitPullRequest,
+  github_create_pr: GitPullRequest,
+  github_merge_pr: GitMerge,
+  github_push_files: PencilLine,
+  github_save_token: GitBranch,
+};
 
 // ---------------------------------------------------------------------------
 // Elapsed timer — tracks how long the reasoning block has been open
@@ -98,14 +151,8 @@ function ToolIcon({
 
   if (error) return <AlertCircle className={cls} />;
   if (pending) return <Loader2 className={cls} />;
-  if (toolName.includes("github") || toolName.includes("branch") || toolName.includes("pr"))
-    return <GitBranch className={cls} />;
-  if (toolName.includes("search")) return <Search className={cls} />;
-  if (toolName.includes("write") || toolName.includes("edit") || toolName.includes("push"))
-    return <PencilLine className={cls} />;
-  if (toolName.includes("file") || toolName.includes("code")) return <FileCode2 className={cls} />;
-  if (toolName.includes("message") || toolName.includes("chat")) return <MessageSquareText className={cls} />;
-  return <Check className={cls} />;
+  const Icon = TOOL_ICONS[toolName] ?? Check;
+  return <Icon className={cls} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,9 +168,16 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
 
   // Prefer Copilot-style messages when present, otherwise fall back to the
   // raw tool name + an extracted detail.
+  const fallbackMsg = describeTool(event.toolName, event.args);
+  const invocationMessage = event.invocationMessage?.includes(event.toolName)
+    ? undefined
+    : event.invocationMessage;
+  const pastTenseMessage = event.pastTenseMessage?.includes(event.toolName)
+    ? undefined
+    : event.pastTenseMessage;
   const msg = isPending
-    ? event.invocationMessage
-    : (event.pastTenseMessage ?? event.invocationMessage);
+    ? invocationMessage ?? fallbackMsg
+    : (pastTenseMessage ?? invocationMessage ?? fallbackMsg);
 
   const fallbackDetail = (() => {
     if (event.result && typeof event.result === "object") {
@@ -175,7 +229,7 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
             ) : (
               <>
                 <span className={cn("truncate", isError && "text-destructive")}>
-                  {getToolLabel(event.toolName)}
+                  {describeTool(event.toolName, event.args)}
                 </span>
                 <span className="shrink-0 text-[12px] text-muted-foreground/55">
                   {TOOL_STATE_LABELS[event.state] ?? event.state}
@@ -189,6 +243,11 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
               )}
             />
           </div>
+          {isError && (
+            <span className="mt-0.5 inline-flex rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
+              Error
+            </span>
+          )}
           {!msg && fallbackDetail && (
             <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/50">
               {typeof fallbackDetail === "string" ? fallbackDetail : JSON.stringify(fallbackDetail)}
@@ -437,6 +496,7 @@ function ReasoningBlock({
 }) {
   const [open, setOpen] = useState(false);
   const text = reasoningEvents
+    .filter((e) => e.type === "reasoning-delta")
     .map((e) => e.text)
     .join("")
     .trim();
@@ -446,7 +506,7 @@ function ReasoningBlock({
   if (!text && !isStreaming) return null;
 
   const header = isStreaming
-    ? `Thinking${elapsed > 0 ? ` ${elapsed}s` : "…"}`
+    ? `Thinking${elapsed > 0 ? ` ${elapsed}s` : ""}…`
     : `Thought${elapsed > 0 ? ` for ${elapsed}s` : ""}`;
 
   return (
@@ -455,13 +515,12 @@ function ReasoningBlock({
         onClick={() => setOpen((v) => !v)}
         className="group/reasoning inline-flex items-center gap-1.5 text-[12px] italic leading-none text-muted-foreground/80 hover:text-muted-foreground"
       >
-        <span className="text-primary/70">*</span>
-        <span>{header}</span>
-        {activeToolNames && activeToolNames.length > 0 && (
-          <span className="text-[11px] text-primary/40">
-            · {activeToolNames.join(", ")}
-          </span>
+        {isStreaming ? (
+          <span aria-hidden className="inline-block size-1.5 rounded-full bg-primary/70 animate-pulse" />
+        ) : (
+          <span className="text-primary/70">*</span>
         )}
+        <span>{header}</span>
         <svg
           className={cn(
             "size-3 transition-transform",
@@ -806,7 +865,7 @@ function StreamingAssistantMessage({
     .filter((t) =>
       ["calling", "input-streaming", "input-available", "executing"].includes(t.state)
     )
-    .map((t) => getToolLabel(t.toolName));
+    .map((t) => describeTool(t.toolName, t.args));
 
   // Full text across all text segments — for copy button
   const allText = segments
