@@ -4,7 +4,6 @@ import { useState } from "react";
 import {
   AlertCircle,
   ChevronRight,
-  Circle,
   FileText,
   FolderOpen,
   GitBranch,
@@ -262,6 +261,8 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
   const [open, setOpen] = useState(false);
   const error = tool.state === "error" || tool.state === "output-error";
   const isPending = ["calling", "input-streaming", "input-available", "executing"].includes(tool.state);
+  const isDone = !isPending && !error;
+
   const fallbackLabel = describeTool(tool.toolName, tool.args);
   const invocationMessage = isRawToolMessage(tool.invocationMessage, tool.toolName)
     ? undefined
@@ -272,71 +273,132 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
   const label = isPending
     ? invocationMessage ?? fallbackLabel
     : pastTenseMessage ?? invocationMessage ?? fallbackLabel;
+
+  // Pull a short mono "target" out of args (path / repo / query / cmd / url)
+  const a = tool.args ?? {};
+  const target =
+    asString(a.path) ??
+    asString(a.filePath) ??
+    asString(a.filename) ??
+    asString(a.url) ??
+    formatRepo(a) ??
+    asString(a.query) ??
+    asString(a.search) ??
+    asString(a.q) ??
+    asString(a.command) ??
+    asString(a.cmd);
+  const targetShort = target
+    ? target.length > 64
+      ? `…${target.slice(-63)}`
+      : target
+    : undefined;
+
   const hasDetails =
     (tool.args && Object.keys(tool.args).length > 0) || tool.result != null;
 
   return (
-    <div className="group/tool relative py-1">
+    <div className="group/tool relative">
       <button
         type="button"
         onClick={() => hasDetails && setOpen((v) => !v)}
         disabled={!hasDetails}
         className={cn(
-          "inline-flex max-w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[13px]",
-          hasDetails && "hover:bg-muted/40",
+          "flex w-full max-w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors",
+          hasDetails && "hover:bg-muted/50",
           "disabled:cursor-default",
         )}
       >
-        <ToolIcon toolName={tool.toolName} state={tool.state} />
         <span
           className={cn(
-            "min-w-0 truncate text-foreground/85",
+            "flex size-5 shrink-0 items-center justify-center rounded-md border",
+            isPending && "border-primary/30 bg-primary/5",
+            isDone && "border-border/60 bg-muted/40",
+            error && "border-destructive/40 bg-destructive/5",
+          )}
+        >
+          <ToolIcon toolName={tool.toolName} state={tool.state} />
+        </span>
+
+        <span
+          className={cn(
+            "min-w-0 truncate font-medium text-foreground/90",
             error && "text-destructive",
           )}
         >
           {label}
         </span>
-        {error && (
-          <span className="shrink-0 rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
-            Error
+
+        {targetShort && (
+          <span className="min-w-0 truncate font-mono text-[11.5px] text-muted-foreground/80">
+            {targetShort}
           </span>
         )}
-        {hasDetails && (
-          <ChevronRight
-            className={cn(
-              "size-3 shrink-0 text-muted-foreground/60 transition-transform",
-              open && "rotate-90",
-            )}
-          />
-        )}
+
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          {error && (
+            <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
+              Error
+            </span>
+          )}
+          {isPending && (
+            <span className="text-[10.5px] font-medium uppercase tracking-wide text-primary/70">
+              Running
+            </span>
+          )}
+          {hasDetails && (
+            <ChevronRight
+              className={cn(
+                "size-3 text-muted-foreground/60 transition-transform",
+                open && "rotate-90",
+              )}
+            />
+          )}
+        </span>
       </button>
 
-      {hasDetails && open && (
-        <div className="mt-1 ml-7 space-y-2 border-l border-border/60 pl-3">
-          {tool.args && Object.keys(tool.args).length > 0 && (
-            <div>
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
-                Input
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+          open && hasDetails ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        )}
+      >
+        <div className="overflow-hidden">
+          <div className="ml-7 mt-1 mb-1 space-y-2 border-l border-border/60 pl-3">
+            {tool.args && Object.keys(tool.args).length > 0 && (
+              <div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                  Input
+                </div>
+                <pre className="mt-1 overflow-x-auto rounded-md border border-border/50 bg-muted/40 px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">
+                  {formatJson(tool.args)}
+                </pre>
               </div>
-              <pre className="mt-1 overflow-x-auto rounded-md bg-muted/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
-                {formatJson(tool.args)}
-              </pre>
-            </div>
-          )}
-          {tool.result != null && (
-            <div>
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
-                Output
+            )}
+            {tool.result != null && (
+              <div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                  Output
+                </div>
+                <pre className="mt-1 max-h-72 overflow-auto rounded-md border border-border/50 bg-muted/40 px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">
+                  {typeof tool.result === "string"
+                    ? tool.result
+                    : formatJson(tool.result)}
+                </pre>
               </div>
-              <pre className="mt-1 max-h-72 overflow-auto rounded-md bg-muted/40 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
-                {typeof tool.result === "string"
-                  ? tool.result
-                  : formatJson(tool.result)}
-              </pre>
-            </div>
-          )}
+            )}
+            {error && tool.errorText && (
+              <div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-destructive/80">
+                  Error
+                </div>
+                <pre className="mt-1 overflow-x-auto rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed text-destructive">
+                  {tool.errorText}
+                </pre>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -345,29 +407,25 @@ export function ToolPartList({ tools }: { tools: ToolCallPart[] }) {
   const [expanded, setExpanded] = useState(false);
   if (!tools.length) return null;
 
-  const collapsible = tools.length > 3;
-  const visible = collapsible && !expanded ? tools.slice(-2) : tools;
+  const collapsible = tools.length > 4;
+  const visible = collapsible && !expanded ? tools.slice(-3) : tools;
+  const hidden = tools.length - visible.length;
 
   return (
-    <div className="relative ml-0.5 border-l border-border/60 pl-3">
-      {collapsible && !expanded && (
+    <div className="rounded-lg border border-border/60 bg-card/40 p-1">
+      {collapsible && !expanded && hidden > 0 && (
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="mb-1 inline-flex items-center gap-1.5 text-[12px] text-muted-foreground/70 hover:text-muted-foreground"
+          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground/80 transition-colors hover:bg-muted/40 hover:text-foreground"
         >
           <ChevronRight className="size-3" />
-          <span>Used {tools.length} tools</span>
+          <span>Show {hidden} earlier {hidden === 1 ? "step" : "steps"}</span>
         </button>
       )}
 
       {visible.map((tool, index) => (
-        <div key={`${tool.toolName}-${index}`} className="relative">
-          <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
-            <Circle className="size-1.5 fill-background text-border" />
-          </span>
-          <ToolPart tool={tool} />
-        </div>
+        <ToolPart key={`${tool.toolName}-${index}`} tool={tool} />
       ))}
     </div>
   );

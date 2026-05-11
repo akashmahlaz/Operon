@@ -26,8 +26,8 @@ import { TOOL_STATE_LABELS } from "@/hooks/use-stream-events/types";
 import {
   AlertCircle,
   AlertTriangle,
+  Brain,
   Check,
-  Circle,
   Copy,
   ExternalLink,
   FileCode2,
@@ -165,6 +165,7 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
     event.state
   );
   const isError = event.state === "output-error";
+  const isDone = !isPending && !isError;
 
   // Prefer Copilot-style messages when present, otherwise fall back to the
   // raw tool name + an extracted detail.
@@ -179,85 +180,81 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
     ? invocationMessage ?? fallbackMsg
     : (pastTenseMessage ?? invocationMessage ?? fallbackMsg);
 
-  const fallbackDetail = (() => {
-    if (event.result && typeof event.result === "object") {
-      const r = event.result as Record<string, unknown>;
-      return (
-        r.path ??
-        r.filePath ??
-        r.filename ??
-        r.query ??
-        r.search ??
-        (r.owner && r.repo ? `${r.owner}/${r.repo}` : null)
-      );
+  // Extract a short mono "target" (path / repo / query / cmd) for the inline subtitle
+  const a = (event.args ?? {}) as Record<string, unknown>;
+  const pickStr = (...keys: string[]) => {
+    for (const k of keys) {
+      const v = a[k];
+      if (typeof v === "string" && v.length) return v;
     }
-    if (event.args && typeof event.args === "object") {
-      const a = event.args as Record<string, unknown>;
-      return (
-        a.path ??
-        a.filePath ??
-        a.query ??
-        a.search ??
-        (a.owner && a.repo ? `${a.owner}/${a.repo}` : null)
-      );
-    }
-    return null;
-  })();
+    return undefined;
+  };
+  const repo =
+    typeof a.owner === "string" && typeof a.repo === "string"
+      ? `${a.owner}/${a.repo}`
+      : undefined;
+  const target =
+    pickStr("path", "filePath", "filename", "url") ??
+    repo ??
+    pickStr("query", "search", "q", "command", "cmd");
+  const targetShort = target
+    ? target.length > 64
+      ? `…${target.slice(-63)}`
+      : target
+    : undefined;
 
   return (
-    <div className="group/tool relative">
+    <div className="group/tool">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-start gap-2.5 py-1 text-left text-[13px] text-muted-foreground hover:text-foreground/80"
+        className="flex w-full max-w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors hover:bg-muted/50"
       >
-        <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+        <span
+          className={cn(
+            "flex size-5 shrink-0 items-center justify-center rounded-md border",
+            isPending && "border-primary/30 bg-primary/5",
+            isDone && "border-border/60 bg-muted/40",
+            isError && "border-destructive/40 bg-destructive/5",
+          )}
+        >
           <ToolIcon toolName={event.toolName} state={event.state} />
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            {msg ? (
-              <span
-                className={cn(
-                  "truncate",
-                  isError && "text-destructive"
-                )}
-                /* invocationMessage / pastTenseMessage are markdown-ish; render plain. */
-              >
-                {msg}
-              </span>
-            ) : (
-              <>
-                <span className={cn("truncate", isError && "text-destructive")}>
-                  {describeTool(event.toolName, event.args)}
-                </span>
-                <span className="shrink-0 text-[12px] text-muted-foreground/55">
-                  {TOOL_STATE_LABELS[event.state] ?? event.state}
-                </span>
-              </>
-            )}
-            <ChevronRight
-              className={cn(
-                "ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform",
-                open && "rotate-90"
-              )}
-            />
-          </div>
+        <span
+          className={cn(
+            "min-w-0 truncate font-medium text-foreground/90",
+            isError && "text-destructive",
+          )}
+        >
+          {msg ?? describeTool(event.toolName, event.args)}
+        </span>
+        {targetShort && (
+          <span className="min-w-0 truncate font-mono text-[11.5px] text-muted-foreground/80">
+            {targetShort}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {isError && (
-            <span className="mt-0.5 inline-flex rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
+            <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
               Error
             </span>
           )}
-          {!msg && fallbackDetail && (
-            <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/50">
-              {typeof fallbackDetail === "string" ? fallbackDetail : JSON.stringify(fallbackDetail)}
-            </div>
+          {isPending && (
+            <span className="text-[10.5px] font-medium uppercase tracking-wide text-primary/70">
+              {TOOL_STATE_LABELS[event.state] ?? "Running"}
+            </span>
           )}
-        </div>
+          <ChevronRight
+            className={cn(
+              "size-3 text-muted-foreground/60 transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        </span>
       </button>
 
       {open && (
-        <div className="mt-1 ml-6 rounded-md border border-border/60 bg-muted/30 p-2 text-[11px]">
+        <div className="mt-1 ml-7 rounded-md border border-border/60 bg-muted/30 p-2 text-[11px]">
           {event.args !== undefined && (
             <div className="mb-1">
               <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
@@ -469,14 +466,9 @@ function UsageBadge({ ev }: { ev: UsageEvent }) {
 function ToolCallList({ events, onRetry }: { events: ToolCallEvent[]; onRetry?: (ev: ToolCallEvent) => void }) {
   if (!events.length) return null;
   return (
-    <div className="relative ml-0.5 border-l border-border/70 pl-3">
+    <div className="rounded-lg border border-border/60 bg-card/40 p-1">
       {events.map((ev, i) => (
-        <div key={`${ev.toolCallId}-${i}`} className="relative">
-          <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
-            <Circle className="size-1.5 fill-background text-border" />
-          </span>
-          <ToolCallItem event={ev} onRetry={onRetry} />
-        </div>
+        <ToolCallItem key={`${ev.toolCallId}-${i}`} event={ev} onRetry={onRetry} />
       ))}
     </div>
   );
@@ -501,57 +493,80 @@ function ReasoningBlock({
     .join("")
     .trim();
   const elapsed = useElapsedTimer(isStreaming);
-  const effectiveOpen = open || !!isStreaming;
+  const wasStreaming = useRef(false);
+
+  // Auto-collapse the moment streaming finishes so the answer takes focus.
+  useEffect(() => {
+    if (isStreaming) {
+      wasStreaming.current = true;
+    } else if (wasStreaming.current) {
+      setOpen(false);
+      wasStreaming.current = false;
+    }
+  }, [isStreaming]);
+
+  const effectiveOpen = isStreaming ? true : open;
 
   if (!text && !isStreaming) return null;
 
   const header = isStreaming
-    ? `Thinking${elapsed > 0 ? ` ${elapsed}s` : ""}…`
+    ? `Thinking${elapsed > 0 ? ` · ${elapsed}s` : "…"}`
     : `Thought${elapsed > 0 ? ` for ${elapsed}s` : ""}`;
+  const subtitle = isStreaming && activeToolNames && activeToolNames.length > 0 ? activeToolNames[0] : undefined;
 
   return (
     <div className="text-muted-foreground">
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="group/reasoning inline-flex items-center gap-1.5 text-[12px] italic leading-none text-muted-foreground/80 hover:text-muted-foreground"
-      >
-        {isStreaming ? (
-          <span aria-hidden className="inline-block size-1.5 rounded-full bg-primary/70 animate-pulse" />
-        ) : (
-          <span className="text-primary/70">*</span>
+        type="button"
+        onClick={() => !isStreaming && setOpen((v) => !v)}
+        disabled={isStreaming}
+        className={cn(
+          "group/reasoning inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] font-medium text-muted-foreground/85 transition-colors",
+          !isStreaming && "hover:bg-muted/60 hover:text-foreground",
+          isStreaming && "cursor-default",
         )}
-        <span>{header}</span>
-        <svg
+      >
+        <Brain
           className={cn(
-            "size-3 transition-transform",
-            effectiveOpen && "rotate-90"
+            "size-3.5 text-muted-foreground/70",
+            isStreaming && "animate-(--animate-pulse-soft) text-primary/80",
           )}
-          viewBox="0 0 16 16"
-          fill="none"
-        >
-          <path
-            d="M6 4l4 4-4 4"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        />
+        <span>{header}</span>
+        {subtitle && (
+          <span className="hidden text-muted-foreground/60 sm:inline">
+            · {subtitle}
+          </span>
+        )}
+        {!isStreaming && (
+          <svg
+            className={cn(
+              "size-3 text-muted-foreground/60 transition-transform",
+              effectiveOpen && "rotate-180",
+            )}
+            viewBox="0 0 16 16"
+            fill="none"
+          >
+            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
       </button>
 
       <div
         className={cn(
-          "overflow-hidden transition-[max-height,opacity] duration-200 ease-out",
-          effectiveOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+          "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+          effectiveOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
         )}
       >
-        <div className="mt-2 border-l border-border/70 pl-3">
-          <p className="whitespace-pre-wrap text-[12px] italic leading-relaxed text-muted-foreground/75">
-            {text}
-            {isStreaming && (
-              <span className="ml-0.5 inline-block w-px h-3 bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
-            )}
-          </p>
+        <div className="overflow-hidden">
+          <div className="ml-2 mt-1.5 border-l-2 border-border/70 pl-3">
+            <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/80">
+              {text}
+              {isStreaming && (
+                <span className="ml-0.5 inline-block h-3 w-0.5 translate-y-0.5 rounded-sm bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
+              )}
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -621,23 +636,38 @@ function CodeBlockFenced({ code, lang }: { code: string; lang: string }) {
 function SourceUrlPills({ urls }: { urls: SourceUrlEvent[] }) {
   if (!urls.length) return null;
   return (
-    <div className="mt-1 flex flex-wrap gap-1.5">
-      {urls.map((u, i) => {
-        let host = u.url;
-        try { host = new URL(u.url).hostname.replace("www.", ""); } catch { /* noop */ }
-        return (
-          <a
-            key={i}
-            href={u.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/60 px-2.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
-          >
-            <ExternalLink className="size-2.5 shrink-0" />
-            <span className="max-w-45 truncate">{u.title || host}</span>
-          </a>
-        );
-      })}
+    <div className="mt-2">
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+        Sources
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {urls.map((u, i) => {
+          let host = u.url;
+          try {
+            host = new URL(u.url).hostname.replace(/^www\./, "");
+          } catch {
+            /* noop */
+          }
+          return (
+            <a
+              key={i}
+              href={u.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-card/40 px-2 py-1 text-[11.5px] text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent/40 hover:text-foreground"
+            >
+              <span className="flex size-4 shrink-0 items-center justify-center rounded-sm bg-muted text-[10px] font-semibold tabular-nums text-muted-foreground/80 group-hover:bg-primary/15 group-hover:text-primary">
+                {i + 1}
+              </span>
+              <span className="min-w-0 truncate">{u.title || host}</span>
+              <span className="hidden shrink-0 font-mono text-[10.5px] text-muted-foreground/60 sm:inline">
+                {host}
+              </span>
+              <ExternalLink className="size-3 shrink-0 opacity-60 group-hover:opacity-100" />
+            </a>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -799,8 +829,8 @@ function AssistantLabel() {
 function UserMessage({ text }: { text: string }) {
   return (
     <div className="group/user mt-4 mb-2 flex justify-end">
-      <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-muted/70 px-4 py-2.5">
-        <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed text-foreground">
+      <div className="max-w-[80%] rounded-2xl rounded-tr-md bg-primary px-3.5 py-2 text-primary-foreground shadow-xs">
+        <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed">
           {text}
         </p>
       </div>
