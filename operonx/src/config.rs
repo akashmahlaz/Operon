@@ -20,6 +20,7 @@ pub struct Config {
     pub github_client_id: Option<String>,
     pub github_client_secret: Option<String>,
     pub oauth_redirect_base: String,
+    pub next_base_url: String,
 }
 
 impl Config {
@@ -66,6 +67,10 @@ impl Config {
         let github_client_secret = env::var("GITHUB_CLIENT_SECRET").ok().filter(|v| !v.is_empty());
         let oauth_redirect_base = env::var("OPERON_OAUTH_REDIRECT_BASE")
             .unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
+        let next_base_url = env::var("OPERON_NEXT_BASE_URL")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| web_origin.trim_end_matches('/').to_owned());
 
         Ok(Self {
             bind_addr,
@@ -84,6 +89,7 @@ impl Config {
             github_client_id,
             github_client_secret,
             oauth_redirect_base,
+            next_base_url,
         })
     }
 }

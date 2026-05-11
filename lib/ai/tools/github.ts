@@ -2,10 +2,15 @@ import { tool } from "ai";
 import { z } from "zod";
 import { appendLog } from "@/lib/services/logs";
 import {
+  commitMultipleGitHubFiles,
+  createGitHubBranch,
+  createGitHubPullRequest,
   createGitHubRepo,
   createOrUpdateGitHubFile,
+  deleteGitHubFile,
   getGitHubRepo,
   getGitHubStatus,
+  listGitHubBranches,
   listGitHubRepoContents,
   listGitHubRepos,
   readGitHubFile,
@@ -130,6 +135,91 @@ export function createGitHubTools(userId: string) {
       execute: async (input) => {
         await appendLog({ userId, level: "info", source: "ai-tool", message: "GitHub file written", metadata: { tool: "github_write_file", owner: input.owner, repo: input.repo, path: input.path } });
         return createOrUpdateGitHubFile(userId, input);
+      },
+    }),
+    github_list_branches: tool({
+      description: "List branches of a GitHub repository (sorted by GitHub default ordering).",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        perPage: z.number().int().min(1).max(100).optional(),
+      }),
+      execute: async ({ owner, repo, perPage }) => {
+        await appendLog({ userId, level: "info", source: "ai-tool", message: "GitHub branches listed", metadata: { tool: "github_list_branches", owner, repo } });
+        return { branches: await listGitHubBranches(userId, owner, repo, perPage ?? 50) };
+      },
+    }),
+    github_create_branch: tool({
+      description: "Create a new branch in a GitHub repository, branched off `fromBranch` (defaults to the repository default branch). Use this before making changes you want to ship as a pull request.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        branch: z.string().min(1).describe("New branch name, e.g. 'feat/add-stripe-checkout'."),
+        fromBranch: z.string().optional().describe("Source branch. Defaults to the repository default branch."),
+      }),
+      execute: async (input) => {
+        await appendLog({ userId, level: "info", source: "ai-tool", message: "GitHub branch created", metadata: { tool: "github_create_branch", owner: input.owner, repo: input.repo, branch: input.branch } });
+        return createGitHubBranch(userId, input);
+      },
+    }),
+    github_delete_file: tool({
+      description: "Delete a single file from a GitHub repository. Requires the file's current `sha` (read it first with github_read_file).",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        path: z.string().min(1),
+        message: z.string().min(1),
+        sha: z.string().min(1),
+        branch: z.string().optional(),
+      }),
+      execute: async (input) => {
+        await appendLog({ userId, level: "info", source: "ai-tool", message: "GitHub file deleted", metadata: { tool: "github_delete_file", owner: input.owner, repo: input.repo, path: input.path } });
+        return deleteGitHubFile(userId, input);
+      },
+    }),
+    github_commit_files: tool({
+      description: "Commit multiple file changes (writes and/or deletes) in a single commit on a branch. Prefer this over multiple github_write_file calls when scaffolding or refactoring — it produces ONE clean commit and is much faster.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        branch: z.string().min(1).describe("Target branch (must already exist; create with github_create_branch if needed)."),
+        message: z.string().min(1).describe("Commit message describing the change."),
+        files: z
+          .array(
+            z.union([
+              z.object({
+                path: z.string().min(1),
+                content: z.string().describe("Full plain-text file content."),
+              }),
+              z.object({
+                path: z.string().min(1),
+                delete: z.literal(true).describe("Set to true to delete this path."),
+              }),
+            ]),
+          )
+          .min(1)
+          .max(80)
+          .describe("List of file writes and/or deletes to apply atomically."),
+      }),
+      execute: async (input) => {
+        await appendLog({ userId, level: "info", source: "ai-tool", message: "GitHub multi-file commit", metadata: { tool: "github_commit_files", owner: input.owner, repo: input.repo, branch: input.branch, fileCount: input.files.length } });
+        return commitMultipleGitHubFiles(userId, input);
+      },
+    }),
+    github_create_pr: tool({
+      description: "Open a pull request from `head` branch into `base` branch. Use after pushing a feature branch with github_commit_files. The returned `url` is the PR page on github.com.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        title: z.string().min(1),
+        head: z.string().min(1).describe("Source branch (the branch with the new commits)."),
+        base: z.string().min(1).describe("Target branch (usually 'main' or the repo default branch)."),
+        body: z.string().optional().describe("Markdown PR body explaining the change."),
+        draft: z.boolean().optional().describe("Open as draft PR. Defaults to false."),
+      }),
+      execute: async (input) => {
+        await appendLog({ userId, level: "info", source: "ai-tool", message: "GitHub PR opened", metadata: { tool: "github_create_pr", owner: input.owner, repo: input.repo, head: input.head, base: input.base } });
+        return createGitHubPullRequest(userId, input);
       },
     }),
   };

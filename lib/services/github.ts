@@ -232,3 +232,190 @@ export async function createOrUpdateGitHubFile(
   };
 }
 
+// --- Web-mode coding helpers (branches, multi-file commits, PRs, deletes) ---
+
+export interface GitHubBranchSummary {
+  name: string;
+  sha: string;
+  protected: boolean;
+}
+
+export async function listGitHubBranches(userId: string, owner: string, repo: string, perPage = 50): Promise<GitHubBranchSummary[]> {
+  const token = await resolveProviderKey("github", userId);
+  if (!token) throw new Error("GitHub token not configured");
+  const data = await githubFetch<Array<{ name: string; commit: { sha: string }; protected: boolean }>>(
+    token,
+    `/repos/${repoFullName(owner, repo)}/branches?per_page=${Math.min(100, Math.max(1, perPage))}`,
+  );
+  return data.map((b) => ({ name: b.name, sha: b.commit.sha, protected: b.protected }));
+}
+
+export async function getGitHubBranch(userId: string, owner: string, repo: string, branch: string) {
+  const token = await resolveProviderKey("github", userId);
+  if (!token) throw new Error("GitHub token not configured");
+  const data = await githubFetch<{ name: string; commit: { sha: string } }>(
+    token,
+    `/repos/${repoFullName(owner, repo)}/branches/${encodeURIComponent(branch)}`,
+  );
+  return { name: data.name, sha: data.commit.sha };
+}
+
+export async function createGitHubBranch(
+  userId: string,
+  args: { owner: string; repo: string; branch: string; fromBranch?: string },
+) {
+  const token = await resolveProviderKey("github", userId);
+  if (!token) throw new Error("GitHub token not configured");
+  let baseSha: string;
+  if (args.fromBranch) {
+    const base = await getGitHubBranch(userId, args.owner, args.repo, args.fromBranch);
+    baseSha = base.sha;
+  } else {
+    const repoMeta = await getGitHubRepo(userId, args.owner, args.repo);
+    const base = await getGitHubBranch(userId, args.owner, args.repo, repoMeta.defaultBranch);
+    baseSha = base.sha;
+  }
+  const data = await githubFetch<{ ref: string; object: { sha: string } }>(
+    token,
+    `/repos/${repoFullName(args.owner, args.repo)}/git/refs`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ref: `refs/heads/${args.branch}`, sha: baseSha }),
+    },
+  );
+  return { ref: data.ref, sha: data.object.sha, branch: args.branch, base: baseSha };
+}
+
+export async function deleteGitHubFile(
+  userId: string,
+  args: { owner: string; repo: string; path: string; message: string; sha: string; branch?: string },
+) {
+  const token = await resolveProviderKey("github", userId);
+  if (!token) throw new Error("GitHub token not configured");
+  const encodedPath = encodeRepoContentPath(args.path);
+  const body: Record<string, unknown> = { message: args.message, sha: args.sha };
+  if (args.branch) body.branch = args.branch;
+  const data = await githubFetch<{ commit: { sha: string; html_url: string } }>(
+    token,
+    `/repos/${repoFullName(args.owner, args.repo)}/contents/${encodedPath}`,
+    {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return { commit: { sha: data.commit.sha, url: data.commit.html_url }, deletedPath: args.path };
+}
+
+export interface GitHubMultiFileCommitInput {
+  owner: string;
+  repo: string;
+  branch: string;
+  message: string;
+  files: Array<{ path: string; content: string } | { path: string; delete: true }>;
+}
+
+/**
+ * Commit multiple file changes in a single commit using the git data API
+ * (blob → tree → commit → ref). Use this whenever the agent needs to
+ * scaffold or modify several files atomically (e.g. a Next.js app).
+ */
+export async function commitMultipleGitHubFiles(userId: string, input: GitHubMultiFileCommitInput) {
+  const token = await resolveProviderKey("github", userId);
+  if (!token) throw new Error("GitHub token not configured");
+  const repoFull = repoFullName(input.owner, input.repo);
+
+  // 1. Get the current branch tip SHA + tree SHA.
+  const branchData = await githubFetch<{ commit: { sha: string; commit: { tree: { sha: string } } } }>(
+    token,
+    `/repos/${repoFull}/branches/${encodeURIComponent(input.branch)}`,
+  );
+  const parentCommitSha = branchData.commit.sha;
+  const baseTreeSha = branchData.commit.commit.tree.sha;
+
+  // 2. Build tree entries. For writes, create a blob then reference its SHA.
+  //    For deletes, set sha=null which removes the path from the tree.
+  const treeEntries: Array<{ path: string; mode: "100644"; type: "blob"; sha: string | null }> = [];
+  for (const file of input.files) {
+    if ("delete" in file && file.delete) {
+      treeEntries.push({ path: file.path, mode: "100644", type: "blob", sha: null });
+      continue;
+    }
+    const blob = await githubFetch<{ sha: string }>(token, `/repos/${repoFull}/git/blobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        content: Buffer.from((file as { content: string }).content, "utf8").toString("base64"),
+        encoding: "base64",
+      }),
+    });
+    treeEntries.push({ path: file.path, mode: "100644", type: "blob", sha: blob.sha });
+  }
+
+  // 3. Create a new tree off the base tree.
+  const newTree = await githubFetch<{ sha: string }>(token, `/repos/${repoFull}/git/trees`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries }),
+  });
+
+  // 4. Create the commit.
+  const newCommit = await githubFetch<{ sha: string; html_url: string }>(token, `/repos/${repoFull}/git/commits`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: input.message, tree: newTree.sha, parents: [parentCommitSha] }),
+  });
+
+  // 5. Move the branch ref to the new commit.
+  await githubFetch(token, `/repos/${repoFull}/git/refs/heads/${encodeURIComponent(input.branch)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sha: newCommit.sha, force: false }),
+  });
+
+  return {
+    commit: { sha: newCommit.sha, url: newCommit.html_url },
+    branch: input.branch,
+    fileCount: input.files.length,
+  };
+}
+
+export interface CreateGitHubPullRequestInput {
+  owner: string;
+  repo: string;
+  title: string;
+  head: string;
+  base: string;
+  body?: string;
+  draft?: boolean;
+}
+
+export async function createGitHubPullRequest(userId: string, input: CreateGitHubPullRequestInput) {
+  const token = await resolveProviderKey("github", userId);
+  if (!token) throw new Error("GitHub token not configured");
+  const data = await githubFetch<{ number: number; html_url: string; head: { ref: string }; base: { ref: string }; title: string; state: string }>(
+    token,
+    `/repos/${repoFullName(input.owner, input.repo)}/pulls`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: input.title,
+        head: input.head,
+        base: input.base,
+        body: input.body,
+        draft: input.draft ?? false,
+      }),
+    },
+  );
+  return {
+    number: data.number,
+    url: data.html_url,
+    title: data.title,
+    head: data.head.ref,
+    base: data.base.ref,
+    state: data.state,
+  };
+}
+

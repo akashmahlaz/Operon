@@ -706,6 +706,20 @@ fn encode_claims(secret: &str, claims: &Claims) -> AppResult<String> {
     Ok(format!("{signed_payload}.{signature}"))
 }
 
+/// Mint a short-lived bearer token for a known user id. Used by background
+/// workers (e.g. the agent runner calling the Next.js connector catalog) when
+/// they need to authenticate as the operator without an HTTP request context.
+pub fn mint_service_token(secret: &str, user_id: Uuid, ttl_seconds: i64) -> AppResult<String> {
+    let now = Utc::now();
+    let claims = Claims {
+        sub: user_id,
+        email: String::new(),
+        iat: now.timestamp() as usize,
+        exp: (now.timestamp() + ttl_seconds) as usize,
+    };
+    encode_claims(secret, &claims)
+}
+
 fn sign(secret: &str, payload: &[u8]) -> AppResult<String> {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| AppError::Internal)?;
     mac.update(payload);

@@ -228,6 +228,9 @@ pub struct RunnerSpec {
     pub initial_user_message: String,
     pub db: Pool<Postgres>,
     pub max_steps: usize,
+    pub channel: String,
+    pub next_base_url: String,
+    pub next_service_token: String,
 }
 
 pub fn spawn(spec: RunnerSpec) -> RunHandle {
@@ -263,16 +266,40 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         .build()
         .context("building reqwest client")?;
 
-    let agent_ctx = AgentContext::new(
-        spec.workspace.clone(),
-        client.clone(),
-        spec.github_token.clone(),
-    );
+    let agent_ctx = {
+        let bridge = if !spec.next_base_url.is_empty() && !spec.next_service_token.is_empty() {
+            Some(crate::agent::next_bridge::NextBridge::new(
+                client.clone(),
+                spec.next_base_url.clone(),
+                spec.next_service_token.clone(),
+                spec.channel.clone(),
+                Some(spec.conversation_id.to_string()),
+            ))
+        } else {
+            None
+        };
+        let next_tools = if let Some(b) = &bridge {
+            b.list_tools().await.unwrap_or_else(|err| {
+                tracing::warn!(error = %err, "failed to load Next.js tool catalog");
+                Vec::new()
+            })
+        } else {
+            Vec::new()
+        };
+        AgentContext::new(
+            spec.workspace.clone(),
+            client.clone(),
+            spec.github_token.clone(),
+            spec.channel.clone(),
+            bridge,
+            next_tools,
+        )
+    };
 
     let mut messages: Vec<ChatMessage> = Vec::new();
     messages.push(ChatMessage {
         role: "system".to_owned(),
-        content: Some(build_system_message(&spec.workspace)),
+        content: Some(build_system_message(&spec.workspace, &spec.channel)),
         name: None,
         tool_call_id: None,
         tool_calls: None,
@@ -290,7 +317,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         messages.extend(prior);
     }
 
-    let tool_definitions = tools::tool_definitions();
+    let tool_definitions = tools::tool_definitions_with_next(&spec.channel, &agent_ctx.next_tools);
 
     for _step in 0..spec.max_steps {
         if handle.cancel.is_cancelled() {

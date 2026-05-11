@@ -50,6 +50,145 @@ async fn get_json(client: &Client, token: &str, url: &str) -> Result<Value> {
         .map_err(|e| anyhow!("invalid github json: {e}"))
 }
 
+async fn send_json(
+    client: &Client,
+    token: &str,
+    method: reqwest::Method,
+    url: &str,
+    body: &Value,
+) -> Result<Value> {
+    let resp = client
+        .request(method, url)
+        .headers(auth_headers(token)?)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| anyhow!("github request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(anyhow!("github error {status}: {text}"));
+    }
+    if text.trim().is_empty() {
+        return Ok(json!({ "ok": true }));
+    }
+    serde_json::from_str(&text).map_err(|e| anyhow!("invalid github json: {e}"))
+}
+
+pub async fn create_repo(
+    client: &Client,
+    token: &str,
+    name: &str,
+    private: bool,
+    description: Option<&str>,
+    auto_init: bool,
+    gitignore_template: Option<&str>,
+    license_template: Option<&str>,
+) -> Result<Value> {
+    let mut body = json!({
+        "name": name,
+        "private": private,
+        "auto_init": auto_init,
+    });
+    if let Some(d) = description { body["description"] = json!(d); }
+    if let Some(g) = gitignore_template { body["gitignore_template"] = json!(g); }
+    if let Some(l) = license_template { body["license_template"] = json!(l); }
+    send_json(client, token, reqwest::Method::POST, &format!("{API_BASE}/user/repos"), &body).await
+}
+
+pub async fn create_branch(
+    client: &Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+    from_branch: Option<&str>,
+) -> Result<Value> {
+    // Resolve the base SHA: use from_branch or repo default branch.
+    let base = match from_branch {
+        Some(b) => b.to_owned(),
+        None => {
+            let r = get_repo(client, token, owner, repo).await?;
+            r.get("default_branch").and_then(|x| x.as_str()).unwrap_or("main").to_owned()
+        }
+    };
+    let ref_url = format!("{API_BASE}/repos/{owner}/{repo}/git/ref/heads/{base}");
+    let base_ref = get_json(client, token, &ref_url).await?;
+    let sha = base_ref
+        .get("object")
+        .and_then(|o| o.get("sha"))
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| anyhow!("could not resolve base branch sha"))?;
+    let body = json!({ "ref": format!("refs/heads/{branch}"), "sha": sha });
+    send_json(
+        client,
+        token,
+        reqwest::Method::POST,
+        &format!("{API_BASE}/repos/{owner}/{repo}/git/refs"),
+        &body,
+    )
+    .await
+}
+
+pub async fn write_file(
+    client: &Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    contents: &str,
+    message: &str,
+    branch: Option<&str>,
+    sha: Option<&str>,
+) -> Result<Value> {
+    use base64ct::{Base64, Encoding};
+    let encoded = Base64::encode_string(contents.as_bytes());
+    let mut body = json!({ "message": message, "content": encoded });
+    if let Some(b) = branch { body["branch"] = json!(b); }
+    if let Some(s) = sha { body["sha"] = json!(s); }
+    let url = format!("{API_BASE}/repos/{owner}/{repo}/contents/{}", path.trim_start_matches('/'));
+    send_json(client, token, reqwest::Method::PUT, &url, &body).await
+}
+
+pub async fn delete_file(
+    client: &Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    message: &str,
+    sha: &str,
+    branch: Option<&str>,
+) -> Result<Value> {
+    let mut body = json!({ "message": message, "sha": sha });
+    if let Some(b) = branch { body["branch"] = json!(b); }
+    let url = format!("{API_BASE}/repos/{owner}/{repo}/contents/{}", path.trim_start_matches('/'));
+    send_json(client, token, reqwest::Method::DELETE, &url, &body).await
+}
+
+pub async fn create_pull_request(
+    client: &Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    title: &str,
+    head: &str,
+    base: &str,
+    body_md: Option<&str>,
+    draft: bool,
+) -> Result<Value> {
+    let mut body = json!({ "title": title, "head": head, "base": base, "draft": draft });
+    if let Some(b) = body_md { body["body"] = json!(b); }
+    send_json(
+        client,
+        token,
+        reqwest::Method::POST,
+        &format!("{API_BASE}/repos/{owner}/{repo}/pulls"),
+        &body,
+    )
+    .await
+}
+
 pub async fn get_status(client: &Client, token: Option<&str>) -> Result<Value> {
     let Some(token) = token else {
         return Ok(json!({ "connected": false }));

@@ -1,0 +1,238 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e4]:
+        - link "Operon" [ref=e5] [cursor=pointer]:
+          - /url: /
+          - img "Operon" [ref=e6]:
+            - generic [ref=e7]: Operon
+        - generic [ref=e8]:
+          - button "PLATFORM" [ref=e10]:
+            - text: PLATFORM
+            - img [ref=e11]
+          - button "USE CASES" [ref=e14]:
+            - text: USE CASES
+            - img [ref=e15]
+          - button "RESOURCES" [ref=e18]:
+            - text: RESOURCES
+            - img [ref=e19]
+          - button "COMPANY" [ref=e22]:
+            - text: COMPANY
+            - img [ref=e23]
+        - generic [ref=e25]:
+          - link "Log in" [ref=e26] [cursor=pointer]:
+            - /url: /login
+          - link "Get Started" [ref=e27] [cursor=pointer]:
+            - /url: /signup
+    - main [ref=e28]:
+      - generic [ref=e30]:
+        - generic [ref=e31]: Private · Powerful · Always on
+        - heading "Automate everything from one message." [level=1] [ref=e35]:
+          - text: Automate everything
+          - text: from one message.
+        - paragraph [ref=e36]: Operon connects to the tools you already use and turns natural-language requests into multi-step workflows — coding, marketing, scheduling, sales, all from a single chat.
+        - generic [ref=e37]:
+          - link "Start for free" [ref=e38] [cursor=pointer]:
+            - /url: /dashboard/chat
+            - text: Start for free
+            - img
+          - link "See how it works" [ref=e39] [cursor=pointer]:
+            - /url: "#how-it-works"
+        - paragraph [ref=e40]: No credit card · Free tier forever · Sign in with Google
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - paragraph [ref=e44]: Why Operon
+          - heading "One chat. All your work." [level=2] [ref=e45]
+          - paragraph [ref=e46]: Replace a dozen point tools with a single AI that knows how to drive them.
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - img [ref=e50]
+            - heading "Conversational by default" [level=3] [ref=e53]
+            - paragraph [ref=e54]: Type — or speak — what you want. Operon picks the right tools and runs the steps for you.
+          - generic [ref=e55]:
+            - img [ref=e57]
+            - heading "Multi-step automation" [level=3] [ref=e61]
+            - paragraph [ref=e62]: Long-running workflows with tool calls, branching and review checkpoints. Built on Vercel AI SDK streaming.
+          - generic [ref=e63]:
+            - img [ref=e65]
+            - heading "Persistent memory" [level=3] [ref=e73]
+            - paragraph [ref=e74]: Remembers preferences, files and prior conversations across sessions and channels.
+          - generic [ref=e75]:
+            - img [ref=e77]
+            - heading "Connect your stack" [level=3] [ref=e79]
+            - paragraph [ref=e80]: Google, Microsoft 365, Slack, GitHub, Stripe, WhatsApp, Telegram and more — one click.
+          - generic [ref=e81]:
+            - img [ref=e83]
+            - heading "Multilingual" [level=3] [ref=e87]
+            - paragraph [ref=e88]: Works natively in 22 Indian languages plus English, Spanish, French and German.
+          - generic [ref=e89]:
+            - img [ref=e91]
+            - heading "Private by design" [level=3] [ref=e94]
+            - paragraph [ref=e95]: Self-hosted option, scoped OAuth tokens, audit logs for every tool invocation.
+      - generic [ref=e97]:
+        - generic [ref=e98]:
+          - paragraph [ref=e99]: How it works
+          - heading "One sentence in. A whole workflow out." [level=2] [ref=e100]
+        - generic [ref=e101]:
+          - button "Marketing" [ref=e102]:
+            - img [ref=e103]
+            - text: Marketing
+          - button "Coding" [ref=e106]:
+            - img [ref=e107]
+            - text: Coding
+          - button "Scheduling" [ref=e111]:
+            - img [ref=e112]
+            - text: Scheduling
+          - button "Trading" [ref=e116]:
+            - img [ref=e117]
+            - text: Trading
+        - generic [ref=e120]:
+          - generic [ref=e121]:
+            - paragraph [ref=e122]: You say
+            - paragraph [ref=e123]: Launch a campaign in one message
+            - paragraph [ref=e124]: "\"Draft a 3-post launch series for our v2, schedule on X and LinkedIn for tomorrow 9am, and DM the headline to the team on Slack.\""
+          - generic [ref=e125]:
+            - paragraph [ref=e126]: Operon does
+            - list [ref=e127]:
+              - listitem [ref=e128]:
+                - generic [ref=e129]: "1"
+                - generic [ref=e130]: Drafts copy for X + LinkedIn (3 variants each)
+              - listitem [ref=e131]:
+                - generic [ref=e132]: "2"
+                - generic [ref=e133]: Generates the cover image
+              - listitem [ref=e134]:
+                - generic [ref=e135]: "3"
+                - generic [ref=e136]: Schedules posts in your social tool
+              - listitem [ref=e137]:
+                - generic [ref=e138]: "4"
+                - generic [ref=e139]: "Sends the headline to #launch on Slack"
+      - generic [ref=e141]:
+        - generic [ref=e142]:
+          - paragraph [ref=e143]: Pricing
+          - heading "Simple plans. Cancel anytime." [level=2] [ref=e144]
+        - generic [ref=e145]:
+          - generic [ref=e146]:
+            - heading "Starter" [level=3] [ref=e147]
+            - paragraph [ref=e148]: For exploring and personal projects.
+            - generic [ref=e149]:
+              - generic [ref=e150]: Free
+              - generic [ref=e151]: forever
+            - list [ref=e152]:
+              - listitem [ref=e153]:
+                - img [ref=e154]
+                - generic [ref=e156]: 100 messages / day
+              - listitem [ref=e157]:
+                - img [ref=e158]
+                - generic [ref=e160]: 5 connected tools
+              - listitem [ref=e161]:
+                - img [ref=e162]
+                - generic [ref=e164]: Web channel only
+              - listitem [ref=e165]:
+                - img [ref=e166]
+                - generic [ref=e168]: Community support
+            - link "Start free" [ref=e169] [cursor=pointer]:
+              - /url: /dashboard/chat
+          - generic [ref=e170]:
+            - generic [ref=e171]: Most popular
+            - heading "Pro" [level=3] [ref=e172]
+            - paragraph [ref=e173]: For power users who run their day from chat.
+            - generic [ref=e174]:
+              - generic [ref=e175]: ₹1,999
+              - generic [ref=e176]: / month
+            - list [ref=e177]:
+              - listitem [ref=e178]:
+                - img [ref=e179]
+                - generic [ref=e181]: Unlimited messages
+              - listitem [ref=e182]:
+                - img [ref=e183]
+                - generic [ref=e185]: All integrations
+              - listitem [ref=e186]:
+                - img [ref=e187]
+                - generic [ref=e189]: WhatsApp + Telegram channels
+              - listitem [ref=e190]:
+                - img [ref=e191]
+                - generic [ref=e193]: Memory across sessions
+              - listitem [ref=e194]:
+                - img [ref=e195]
+                - generic [ref=e197]: Priority support
+            - link "Start 14-day trial" [ref=e198] [cursor=pointer]:
+              - /url: /dashboard/chat
+          - generic [ref=e199]:
+            - heading "Team" [level=3] [ref=e200]
+            - paragraph [ref=e201]: Shared workspace for small teams.
+            - generic [ref=e202]:
+              - generic [ref=e203]: ₹4,999
+              - generic [ref=e204]: / month
+            - list [ref=e205]:
+              - listitem [ref=e206]:
+                - img [ref=e207]
+                - generic [ref=e209]: Everything in Pro
+              - listitem [ref=e210]:
+                - img [ref=e211]
+                - generic [ref=e213]: Up to 5 seats
+              - listitem [ref=e214]:
+                - img [ref=e215]
+                - generic [ref=e217]: Shared agents & skills
+              - listitem [ref=e218]:
+                - img [ref=e219]
+                - generic [ref=e221]: Audit log
+              - listitem [ref=e222]:
+                - img [ref=e223]
+                - generic [ref=e225]: SSO
+            - link "Talk to us" [ref=e226] [cursor=pointer]:
+              - /url: /dashboard/chat
+    - contentinfo [ref=e227]:
+      - generic [ref=e228]:
+        - generic [ref=e229]:
+          - img "Operon" [ref=e230]:
+            - generic [ref=e231]: Operon
+          - paragraph [ref=e232]: One chat. All your work. The browser-based AI operating system for the tools you already use.
+        - generic [ref=e233]:
+          - paragraph [ref=e234]: Product
+          - list [ref=e235]:
+            - listitem [ref=e236]:
+              - link "Features" [ref=e237] [cursor=pointer]:
+                - /url: /#features
+            - listitem [ref=e238]:
+              - link "Pricing" [ref=e239] [cursor=pointer]:
+                - /url: /#pricing
+            - listitem [ref=e240]:
+              - link "Changelog" [ref=e241] [cursor=pointer]:
+                - /url: /changelog
+            - listitem [ref=e242]:
+              - link "Roadmap" [ref=e243] [cursor=pointer]:
+                - /url: /roadmap
+        - generic [ref=e244]:
+          - paragraph [ref=e245]: Resources
+          - list [ref=e246]:
+            - listitem [ref=e247]:
+              - link "Docs" [ref=e248] [cursor=pointer]:
+                - /url: /docs
+            - listitem [ref=e249]:
+              - link "Blog" [ref=e250] [cursor=pointer]:
+                - /url: /blog
+            - listitem [ref=e251]:
+              - link "Status" [ref=e252] [cursor=pointer]:
+                - /url: /status
+            - listitem [ref=e253]:
+              - link "Support" [ref=e254] [cursor=pointer]:
+                - /url: /support
+        - generic [ref=e255]:
+          - paragraph [ref=e256]: Company
+          - list [ref=e257]:
+            - listitem [ref=e258]:
+              - link "About" [ref=e259] [cursor=pointer]:
+                - /url: /about
+            - listitem [ref=e260]:
+              - link "Careers" [ref=e261] [cursor=pointer]:
+                - /url: /careers
+            - listitem [ref=e262]:
+              - link "Contact" [ref=e263] [cursor=pointer]:
+                - /url: /contact
+            - listitem [ref=e264]:
+              - link "Privacy" [ref=e265] [cursor=pointer]:
+                - /url: /privacy
+      - generic [ref=e266]:
+        - generic [ref=e267]: © 2026 Operon. All rights reserved.
+        - generic [ref=e268]: v0.1 · built with Next.js + Vercel AI SDK
+  - region "Notifications alt+T"

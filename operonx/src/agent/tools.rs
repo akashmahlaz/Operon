@@ -17,6 +17,7 @@ use similar::TextDiff;
 use tokio::{io::AsyncReadExt, process::Command, time::timeout};
 
 use super::github;
+use super::next_bridge::{NextBridge, NextToolDescriptor};
 
 const MAX_FILE_BYTES: usize = 1_000_000;
 const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 300;
@@ -81,16 +82,90 @@ pub struct AgentContext {
     pub workspace: Workspace,
     pub http: Client,
     pub github_token: Option<String>,
+    /// Conversation channel: "web" | "coding" | "whatsapp" | "telegram".
+    /// Local-fs / shell tools (`exec`, `write_file`, `apply_patch`) are only
+    /// dispatched in `coding`. Web mode must use the GitHub API tools instead.
+    pub channel: String,
+    /// Optional bridge to the Next.js connector catalog (Gmail, Vercel, Stripe,
+    /// Cloudflare, SEO, Meta Ads, memory, skills, MCP). When set, every tool
+    /// the operator has connected on the Next side is exposed to the model and
+    /// dispatched back to /api/tools/execute.
+    pub next_bridge: Option<NextBridge>,
+    /// Tool descriptors fetched from /api/tools at run start. Empty when the
+    /// bridge isn't configured.
+    pub next_tools: Vec<NextToolDescriptor>,
 }
 
 impl AgentContext {
-    pub fn new(workspace: Workspace, http: Client, github_token: Option<String>) -> Self {
-        Self { workspace, http, github_token }
+    pub fn new(
+        workspace: Workspace,
+        http: Client,
+        github_token: Option<String>,
+        channel: String,
+        next_bridge: Option<NextBridge>,
+        next_tools: Vec<NextToolDescriptor>,
+    ) -> Self {
+        Self { workspace, http, github_token, channel, next_bridge, next_tools }
+    }
+
+    fn is_coding(&self) -> bool {
+        self.channel == "coding"
     }
 }
 
-/// Returns the OpenAI-style tool definitions.
-pub fn tool_definitions() -> Vec<Value> {
+/// Returns the OpenAI-style tool definitions filtered for the active channel.
+///
+/// In `web` (and any non-`coding`) channels, the local-fs and shell tools
+/// (`write_file`, `apply_patch`, `exec`) are HIDDEN from the model so it cannot
+/// run `git`/`gh`/etc. against the operator's machine. The model is expected
+/// to use `github_create_repo`, `github_write_file`, `github_create_pr`, etc.
+/// instead.
+#[allow(dead_code)]
+pub fn tool_definitions(channel: &str) -> Vec<Value> {
+    tool_definitions_with_next(channel, &[])
+}
+
+/// Returns the channel-filtered native tool defs PLUS any Next.js connector
+/// tools registered for this run via the [`NextBridge`].
+pub fn tool_definitions_with_next(channel: &str, next_tools: &[NextToolDescriptor]) -> Vec<Value> {
+    let coding = channel == "coding";
+    let local_only: &[&str] = &["write_file", "apply_patch", "exec"];
+    let mut defs: Vec<Value> = all_tool_definitions()
+        .into_iter()
+        .filter(|t| {
+            if coding {
+                return true;
+            }
+            let name = t
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+            !local_only.contains(&name)
+        })
+        .collect();
+    let native_names: std::collections::HashSet<String> = defs
+        .iter()
+        .filter_map(|t| t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).map(str::to_owned))
+        .collect();
+    for t in next_tools {
+        // Avoid colliding with native tools (e.g. github_*). Native wins.
+        if native_names.contains(&t.name) {
+            continue;
+        }
+        defs.push(json!({
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.input_schema,
+            }
+        }));
+    }
+    defs
+}
+
+fn all_tool_definitions() -> Vec<Value> {
     vec![
         tool_def(
             "read_file",
@@ -282,6 +357,91 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             }),
         ),
+        tool_def(
+            "github_create_repo",
+            "Create a new GitHub repository under the connected operator account. Use this — NOT a shell `gh repo create` or `git init` — when the user asks to create a repo. Set `auto_init: true` to seed with README so the repo is immediately usable.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": {
+                    "name":               { "type": "string" },
+                    "private":            { "type": "boolean", "default": true },
+                    "description":        { "type": "string" },
+                    "auto_init":          { "type": "boolean", "default": true },
+                    "gitignore_template": { "type": "string", "description": "e.g. 'Rust', 'Node', 'Python'." },
+                    "license_template":   { "type": "string", "description": "e.g. 'mit', 'apache-2.0'." }
+                }
+            }),
+        ),
+        tool_def(
+            "github_create_branch",
+            "Create a new branch in a GitHub repository, branched off `from_branch` (defaults to the repo default branch).",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo", "branch"],
+                "properties": {
+                    "owner":       { "type": "string" },
+                    "repo":        { "type": "string" },
+                    "branch":      { "type": "string" },
+                    "from_branch": { "type": "string" }
+                }
+            }),
+        ),
+        tool_def(
+            "github_write_file",
+            "Create or update a file in a GitHub repository via the API. Pass the existing `sha` to update an existing file; omit to create a new one. Content is plain text and base64-encoded automatically. Use this — NOT `git push` or `gh` shell commands — to ship a file change in web mode.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo", "path", "contents", "message"],
+                "properties": {
+                    "owner":    { "type": "string" },
+                    "repo":     { "type": "string" },
+                    "path":     { "type": "string" },
+                    "contents": { "type": "string" },
+                    "message":  { "type": "string", "description": "Commit message." },
+                    "branch":   { "type": "string" },
+                    "sha":      { "type": "string", "description": "Existing file blob sha when updating." }
+                }
+            }),
+        ),
+        tool_def(
+            "github_delete_file",
+            "Delete a file from a GitHub repository via the API. Requires the existing blob `sha`.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo", "path", "message", "sha"],
+                "properties": {
+                    "owner":   { "type": "string" },
+                    "repo":    { "type": "string" },
+                    "path":    { "type": "string" },
+                    "message": { "type": "string" },
+                    "sha":     { "type": "string" },
+                    "branch":  { "type": "string" }
+                }
+            }),
+        ),
+        tool_def(
+            "github_create_pr",
+            "Open a pull request from `head` (e.g. 'feature-branch') into `base` (e.g. 'main').",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["owner", "repo", "title", "head", "base"],
+                "properties": {
+                    "owner": { "type": "string" },
+                    "repo":  { "type": "string" },
+                    "title": { "type": "string" },
+                    "head":  { "type": "string" },
+                    "base":  { "type": "string" },
+                    "body":  { "type": "string" },
+                    "draft": { "type": "boolean", "default": false }
+                }
+            }),
+        ),
     ]
 }
 
@@ -298,6 +458,14 @@ fn tool_def(name: &str, description: &str, parameters: Value) -> Value {
 
 pub async fn dispatch(ctx: &AgentContext, tool_name: &str, input: &Value) -> Result<Value> {
     let ws = &ctx.workspace;
+    // Defense in depth: even if the model somehow names a local-only tool,
+    // refuse to run it outside the coding channel.
+    if matches!(tool_name, "exec" | "write_file" | "apply_patch") && !ctx.is_coding() {
+        return Err(anyhow!(
+            "tool `{tool_name}` is not available in the `{}` channel — this runs on a server, not the operator's machine. Use the github_* API tools (github_create_repo / github_write_file / github_create_pr / etc.) to ship changes.",
+            ctx.channel
+        ));
+    }
     match tool_name {
         "read_file" => read_file(ws, input).await,
         "write_file" => write_file(ws, input).await,
@@ -314,7 +482,15 @@ pub async fn dispatch(ctx: &AgentContext, tool_name: &str, input: &Value) -> Res
             })?;
             dispatch_github(&ctx.http, token, name, input).await
         }
-        other => Err(anyhow!("unknown tool: {other}")),
+        other => {
+            // Try the Next.js connector bridge (Gmail, Vercel, Stripe, …).
+            if let Some(bridge) = &ctx.next_bridge {
+                if ctx.next_tools.iter().any(|t| t.name == other) {
+                    return bridge.execute(other, input).await;
+                }
+            }
+            Err(anyhow!("unknown tool: {other}"))
+        }
     }
 }
 
@@ -409,6 +585,81 @@ async fn dispatch_github(
         "github_list_pull_requests" => {
             let a: StateArgs = serde_json::from_value(input.clone())?;
             github::list_pull_requests(client, token, &a.owner, &a.repo, a.state.as_deref()).await
+        }
+        "github_create_repo" => {
+            #[derive(Deserialize)]
+            struct A {
+                name: String,
+                #[serde(default = "default_true")]
+                private: bool,
+                #[serde(default)]
+                description: Option<String>,
+                #[serde(default = "default_true")]
+                auto_init: bool,
+                #[serde(default)]
+                gitignore_template: Option<String>,
+                #[serde(default)]
+                license_template: Option<String>,
+            }
+            fn default_true() -> bool { true }
+            let a: A = serde_json::from_value(input.clone())?;
+            github::create_repo(
+                client, token, &a.name, a.private,
+                a.description.as_deref(), a.auto_init,
+                a.gitignore_template.as_deref(), a.license_template.as_deref(),
+            ).await
+        }
+        "github_create_branch" => {
+            #[derive(Deserialize)]
+            struct A {
+                owner: String, repo: String, branch: String,
+                #[serde(default)]
+                from_branch: Option<String>,
+            }
+            let a: A = serde_json::from_value(input.clone())?;
+            github::create_branch(client, token, &a.owner, &a.repo, &a.branch, a.from_branch.as_deref()).await
+        }
+        "github_write_file" => {
+            #[derive(Deserialize)]
+            struct A {
+                owner: String, repo: String, path: String, contents: String, message: String,
+                #[serde(default)]
+                branch: Option<String>,
+                #[serde(default)]
+                sha: Option<String>,
+            }
+            let a: A = serde_json::from_value(input.clone())?;
+            github::write_file(
+                client, token, &a.owner, &a.repo, &a.path, &a.contents,
+                &a.message, a.branch.as_deref(), a.sha.as_deref(),
+            ).await
+        }
+        "github_delete_file" => {
+            #[derive(Deserialize)]
+            struct A {
+                owner: String, repo: String, path: String, message: String, sha: String,
+                #[serde(default)]
+                branch: Option<String>,
+            }
+            let a: A = serde_json::from_value(input.clone())?;
+            github::delete_file(
+                client, token, &a.owner, &a.repo, &a.path, &a.message, &a.sha, a.branch.as_deref(),
+            ).await
+        }
+        "github_create_pr" => {
+            #[derive(Deserialize)]
+            struct A {
+                owner: String, repo: String, title: String, head: String, base: String,
+                #[serde(default)]
+                body: Option<String>,
+                #[serde(default)]
+                draft: bool,
+            }
+            let a: A = serde_json::from_value(input.clone())?;
+            github::create_pull_request(
+                client, token, &a.owner, &a.repo, &a.title, &a.head, &a.base,
+                a.body.as_deref(), a.draft,
+            ).await
         }
         other => Err(anyhow!("unknown github tool: {other}")),
     }

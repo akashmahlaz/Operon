@@ -127,9 +127,23 @@ fn workspace_context(workspace: &Workspace) -> String {
 /// every chat completion request. Equivalent to Copilot's two-message
 /// `<SystemMessage>` + `<SystemMessage>` chain, flattened for the OpenAI
 /// chat-completions API.
-pub fn build_system_message(workspace: &Workspace) -> String {
+pub fn build_system_message(workspace: &Workspace, channel: &str) -> String {
+    let channel_block = if channel == "coding" {
+        r#"<channelMode>
+Active channel: coding. You have FULL access to the per-conversation server-side workspace via `read_file`, `write_file`, `apply_patch`, `list_dir`, `search`, and `exec`. The workspace is a sandbox on the SERVER, not the operator's laptop. For multi-step builds, prefer the local tools; sync to GitHub at the end with `github_*`.
+</channelMode>"#
+    } else {
+        r#"<channelMode>
+Active channel: web (or non-coding). The local-fs and shell tools (`exec`, `write_file`, `apply_patch`) are DISABLED — they are not in your tool list. To create or change a repository, use ONLY the GitHub API tools:
+- `github_create_repo` to create a new repo (NEVER `gh repo create` or `git init` via shell — those would run on the operator's machine, not in the cloud).
+- `github_create_branch` to branch.
+- `github_write_file` / `github_delete_file` to commit individual files via the API.
+- `github_create_pr` to open a PR.
+Always start with `github_get_status` to confirm the connection.
+</channelMode>"#
+    };
     format!(
-        "{identity}\n\n{instructions}\n\n{ws}",
+        "{identity}\n\n{instructions}\n\n{channel_block}\n\n{ws}",
         identity = IDENTITY_AND_SAFETY,
         instructions = AGENT_INSTRUCTIONS,
         ws = workspace_context(workspace),
