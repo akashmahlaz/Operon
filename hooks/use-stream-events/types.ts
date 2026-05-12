@@ -27,6 +27,8 @@ export type ContentPartType =
   | "text-edit"
   | "confirmation"
   | "command-button"
+  | "subagent-start"
+  | "subagent-result"
   | "warning"
   | "usage";
 
@@ -77,6 +79,17 @@ export interface ProgressEvent {
   id: string;
   type: "progress";
   text: string;
+  status?: "active" | "complete" | "error";
+}
+
+/** Subagent lifecycle rows, modelled after VS Code's runSubagent tool data. */
+export interface SubagentEvent {
+  id: string;
+  type: "subagent-start" | "subagent-result";
+  toolCallId: string;
+  agentName?: string;
+  prompt?: string;
+  result?: unknown;
 }
 
 /** Inline clickable file/symbol anchor. */
@@ -165,6 +178,7 @@ export type StreamPart =
   | TextEditEvent
   | ConfirmationEvent
   | CommandButtonEvent
+  | SubagentEvent
   | WarningEvent
   | UsageEvent;
 

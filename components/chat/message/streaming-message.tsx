@@ -20,6 +20,7 @@ import type {
   TextEditEvent,
   ConfirmationEvent,
   CommandButtonEvent,
+  SubagentEvent,
   WarningEvent,
   UsageEvent,
 } from "@/hooks/use-stream-events/types";
@@ -51,6 +52,7 @@ import {
   Share2,
   ThumbsDown,
   ThumbsUp,
+  UserRound,
 } from "lucide-react";
 
 const TOOL_ICONS: Record<string, typeof FileText> = {
@@ -297,12 +299,20 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
 
 // ---------------------------------------------------------------------------
 // Inline atomic part renderers — progress / anchor / reference / warning /
-// codeblock-uri / text-edit / confirmation / command-button / usage
+// codeblock-uri / text-edit / confirmation / command-button / subagent / usage
 // ---------------------------------------------------------------------------
 function ProgressLine({ ev }: { ev: ProgressEvent }) {
+  const complete = ev.status === "complete";
+  const error = ev.status === "error";
   return (
     <div className="flex items-center gap-2 py-1 text-[12px] italic text-muted-foreground/75">
-      <Loader2 className="size-3 shrink-0 animate-spin" />
+      {complete ? (
+        <Check className="size-3 shrink-0 text-muted-foreground/70" />
+      ) : error ? (
+        <AlertCircle className="size-3 shrink-0 text-destructive" />
+      ) : (
+        <Loader2 className="size-3 shrink-0 animate-spin" />
+      )}
       <span className="truncate">{ev.text}</span>
     </div>
   );
@@ -433,6 +443,36 @@ function CommandButton({ ev }: { ev: CommandButtonEvent }) {
     >
       {ev.title}
     </button>
+  );
+}
+
+function SubagentCard({ events }: { events: SubagentEvent[] }) {
+  const start = events.find((event) => event.type === "subagent-start");
+  const result = [...events].reverse().find((event) => event.type === "subagent-result");
+  const agentName = result?.agentName ?? start?.agentName ?? "subagent";
+  const resultText = typeof result?.result === "string"
+    ? result.result
+    : result?.result == null
+      ? undefined
+      : JSON.stringify(result.result, null, 2);
+
+  return (
+    <div className="my-1 rounded-md border border-border/70 bg-muted/25 px-3 py-2 text-[12.5px]">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        {result ? <Check className="size-3.5" /> : <Loader2 className="size-3.5 animate-spin" />}
+        <span className="font-medium text-foreground/85">
+          {result ? `Completed ${agentName}` : `Delegating to ${agentName}`}
+        </span>
+      </div>
+      {start?.prompt && (
+        <div className="mt-1 line-clamp-2 text-muted-foreground/75">{start.prompt}</div>
+      )}
+      {resultText && (
+        <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded border border-border/50 bg-background/60 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+          {resultText}
+        </pre>
+      )}
+    </div>
   );
 }
 
@@ -748,6 +788,7 @@ type RenderSegment =
   | { kind: "text-edit"; ev: TextEditEvent }
   | { kind: "confirmation"; ev: ConfirmationEvent }
   | { kind: "command-button"; ev: CommandButtonEvent }
+  | { kind: "subagent"; events: SubagentEvent[] }
   | { kind: "usage"; ev: UsageEvent };
 
 type ThinkingRunSegment = Extract<RenderSegment, { kind: "reasoning" } | { kind: "tools" }>;
@@ -829,7 +870,7 @@ function deriveThinkingRunTitle(segments: ThinkingRunSegment[], active: boolean)
 
 function buildSegments(parts: StreamPart[]): RenderSegment[] {
   const segs: RenderSegment[] = [];
-  const seenToolIds = new Set<string>();
+  const toolsById = new Map<string, ToolCallEvent>();
 
   for (const part of parts) {
     const last = segs[segs.length - 1];
@@ -846,8 +887,18 @@ function buildSegments(parts: StreamPart[]): RenderSegment[] {
       }
     } else if (part.type.startsWith("tool-call")) {
       const t = part as ToolCallEvent;
-      if (seenToolIds.has(t.toolCallId)) continue;
-      seenToolIds.add(t.toolCallId);
+      const existing = toolsById.get(t.toolCallId);
+      if (existing) {
+        Object.assign(existing, {
+          ...t,
+          toolName: t.toolName && t.toolName !== "tool" ? t.toolName : existing.toolName,
+          args: t.args ?? existing.args,
+          invocationMessage: t.invocationMessage ?? existing.invocationMessage,
+          pastTenseMessage: t.pastTenseMessage ?? existing.pastTenseMessage,
+        });
+        continue;
+      }
+      toolsById.set(t.toolCallId, t);
       if (last?.kind === "tools") {
         last.tools.push(t);
       } else {
@@ -885,6 +936,14 @@ function buildSegments(parts: StreamPart[]): RenderSegment[] {
       segs.push({ kind: "confirmation", ev: part as ConfirmationEvent });
     } else if (part.type === "command-button") {
       segs.push({ kind: "command-button", ev: part as CommandButtonEvent });
+    } else if (part.type === "subagent-start" || part.type === "subagent-result") {
+      const subagent = part as SubagentEvent;
+      const lastSubagent = last?.kind === "subagent" ? last : undefined;
+      if (lastSubagent && lastSubagent.events.some((event) => event.toolCallId === subagent.toolCallId)) {
+        lastSubagent.events.push(subagent);
+      } else {
+        segs.push({ kind: "subagent", events: [subagent] });
+      }
     } else if (part.type === "usage") {
       segs.push({ kind: "usage", ev: part as UsageEvent });
     }
@@ -939,13 +998,16 @@ function StreamingText({ text, isStreaming }: { text: string; isStreaming: boole
 }
 
 // ---------------------------------------------------------------------------
-// UserMessage - right-aligned bubble (no label)
+// UserMessage - transcript-style prompt row.
 // ---------------------------------------------------------------------------
 function UserMessage({ text }: { text: string }) {
   return (
-    <div className="group/user mt-4 mb-2 flex justify-end">
-      <div className="max-w-[80%] rounded-2xl rounded-tr-md bg-primary px-3.5 py-2 text-primary-foreground shadow-xs">
-        <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed">
+    <div className="group/user flex max-w-4xl items-start gap-2.5 py-3">
+      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/35 text-muted-foreground">
+        <UserRound className="size-3.5" />
+      </div>
+      <div className="min-w-0 flex-1 rounded-md border border-border/60 bg-muted/35 px-3 py-2">
+        <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed text-foreground">
           {text}
         </p>
       </div>
@@ -1062,6 +1124,9 @@ function StreamingAssistantMessage({
           }
           if (seg.kind === "command-button") {
             return <CommandButton key={i} ev={seg.ev} />;
+          }
+          if (seg.kind === "subagent") {
+            return <SubagentCard key={i} events={seg.events} />;
           }
           if (seg.kind === "usage") {
             return <UsageBadge key={i} ev={seg.ev} />;

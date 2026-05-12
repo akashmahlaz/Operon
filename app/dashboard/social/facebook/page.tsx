@@ -243,9 +243,27 @@ export default function FacebookWorkspacePage() {
     }
 
     setOauthConnecting(true);
-    const redirect = encodeURIComponent("/dashboard/social/facebook");
-    const authToken = encodeURIComponent(token);
-    window.location.href = `/api/social/meta/oauth/start?token=${authToken}&redirect=${redirect}`;
+    const start = async () => {
+      try {
+        const res = await fetch("/api/social/meta/oauth/start", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ redirect: "/dashboard/social/facebook" }),
+        });
+        const data = (await res.json()) as { authUrl?: string; error?: string };
+        if (!res.ok || !data.authUrl) throw new Error(data.error ?? "Failed to start OAuth");
+        window.location.href = data.authUrl;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to start OAuth";
+        toast.error(message);
+        setOauthConnecting(false);
+      }
+    };
+
+    void start();
   }
 
   async function loadCampaigns(accountId: string) {
@@ -449,6 +467,11 @@ export default function FacebookWorkspacePage() {
                       "Connect Facebook"
                     )}
                   </Button>
+
+                  <div className="rounded-lg border border-border/70 bg-background/80 p-3 text-xs text-muted-foreground">
+                    OAuth diagnostics: ensure META_APP_ID and META_APP_SECRET are configured. Callback URL should be:
+                    <div className="mt-1 font-medium text-foreground">/api/social/meta/oauth/callback</div>
+                  </div>
                 </div>
               </div>
 

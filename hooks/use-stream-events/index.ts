@@ -15,6 +15,7 @@ import type {
   TextEditEvent,
   ConfirmationEvent,
   CommandButtonEvent,
+  SubagentEvent,
   WarningEvent,
   UsageEvent,
 } from "./types";
@@ -48,6 +49,8 @@ type SSEEventType =
   | "reference"
   | "confirmation"
   | "command-button"
+  | "subagent-start"
+  | "subagent-result"
   | "warning"
   | "usage"
   | "message-end"
@@ -75,7 +78,10 @@ interface SSEEvent {
     uri?: string;
     line?: number;
     isEdit?: boolean;
-    status?: "loading" | "success" | "error" | "omitted" | "partial";
+    status?: "loading" | "success" | "error" | "omitted" | "partial" | "active" | "complete";
+    progressStatus?: "active" | "complete" | "error";
+    agentName?: string;
+    prompt?: string;
     target?: string;
     edits?: unknown;
     isDone?: boolean;
@@ -143,6 +149,8 @@ export function useStreamEvents({
   const reasoningTextRef = useRef<string>("");
   // Active tool calls by id — for updating in-place
   const toolCallsByIdRef = useRef<Map<string, ToolCallEvent>>(new Map());
+  // Initial local placeholder shown before the first SSE frame arrives.
+  const initialProgressPartIdRef = useRef<string | null>(null);
   // Abort controller for cancellation
   const abortRef = useRef<AbortController | null>(null);
   // Guard against double-start
@@ -190,6 +198,15 @@ export function useStreamEvents({
         isStreaming: true,
       };
     }
+
+    const placeholderId = initialProgressPartIdRef.current;
+    if (placeholderId) {
+      assistantMessageRef.current.orderedParts = assistantMessageRef.current.orderedParts.filter(
+        (existing) => existing.id !== placeholderId,
+      );
+      initialProgressPartIdRef.current = null;
+    }
+
     assistantMessageRef.current.orderedParts.push(part);
 
     // Keep tool calls index updated for in-place state transitions
@@ -226,6 +243,20 @@ export function useStreamEvents({
       setMessages((prev) => {
         return upsertAssistantMessage(prev, { ...assistantMessageRef.current! });
       });
+    } else if (partial.toolName || partial.args || partial.result || partial.errorText) {
+      appendPart({
+        id: nextId(),
+        toolCallId,
+        toolName: partial.toolName ?? "tool",
+        type: partial.type ?? "tool-call-start",
+        state: partial.state ?? "calling",
+        args: partial.args,
+        result: partial.result,
+        errorText: partial.errorText,
+        invocationMessage: partial.invocationMessage,
+        pastTenseMessage: partial.pastTenseMessage,
+        originMessage: partial.originMessage,
+      } satisfies ToolCallEvent);
     }
   }
 
@@ -262,7 +293,7 @@ export function useStreamEvents({
       case "reasoning-start":
         reasoningTextRef.current = "";
         appendPart({
-          id: nextId(),
+          id: ev.data.id ?? nextId(),
           type: "reasoning-start",
           text: "",
         } satisfies ReasoningPartEvent);
@@ -274,7 +305,7 @@ export function useStreamEvents({
 
       case "reasoning-end":
         appendPart({
-          id: nextId(),
+          id: ev.data.id ?? nextId(),
           type: "reasoning-end",
           text: "",
         } satisfies ReasoningPartEvent);
@@ -342,9 +373,8 @@ export function useStreamEvents({
         break;
 
       case "tool-call-end":
-        updateToolCall(ev.data.toolCallId ?? "", {
-          type: "tool-call-end",
-        });
+        // End marks lifecycle completion but should not replace the visible
+        // invocation part. The output/error state already carries the UI state.
         break;
 
       case "text-delta":
@@ -377,6 +407,7 @@ export function useStreamEvents({
           id: nextId(),
           type: "progress",
           text: ev.data.text ?? "",
+          status: ev.data.progressStatus ?? (ev.data.status === "complete" ? "complete" : ev.data.status === "active" ? "active" : ev.data.status === "success" ? "complete" : ev.data.status === "error" ? "error" : ev.data.status === "loading" ? "active" : undefined),
         } satisfies ProgressEvent);
         break;
 
@@ -391,12 +422,15 @@ export function useStreamEvents({
         break;
 
       case "reference":
+        const referenceStatus = ev.data.status === "loading" || ev.data.status === "success" || ev.data.status === "error" || ev.data.status === "omitted" || ev.data.status === "partial"
+          ? ev.data.status
+          : undefined;
         appendPart({
           id: nextId(),
           type: "reference",
           uri: ev.data.uri ?? "",
           title: ev.data.title,
-          status: ev.data.status,
+          status: referenceStatus,
         } satisfies ReferenceEvent);
         break;
 
@@ -439,6 +473,26 @@ export function useStreamEvents({
           title: ev.data.title ?? "",
           args: ev.data.args,
         } satisfies CommandButtonEvent);
+        break;
+
+      case "subagent-start":
+        appendPart({
+          id: nextId(),
+          type: "subagent-start",
+          toolCallId: ev.data.toolCallId ?? nextId(),
+          agentName: ev.data.agentName,
+          prompt: ev.data.prompt,
+        } satisfies SubagentEvent);
+        break;
+
+      case "subagent-result":
+        appendPart({
+          id: nextId(),
+          type: "subagent-result",
+          toolCallId: ev.data.toolCallId ?? nextId(),
+          agentName: ev.data.agentName,
+          result: ev.data.result,
+        } satisfies SubagentEvent);
         break;
 
       case "warning":
@@ -523,6 +577,7 @@ export function useStreamEvents({
       assistantMessageRef.current = null;
       reasoningTextRef.current = "";
       toolCallsByIdRef.current.clear();
+      initialProgressPartIdRef.current = null;
       setStatus("submitted");
 
       // Append user message immediately
@@ -533,7 +588,20 @@ export function useStreamEvents({
         isComplete: true,
         isStreaming: false,
       };
-      setMessages((prev) => [...prev, userMsg]);
+      const initialProgressPart: ProgressEvent = {
+        id: nextId(),
+        type: "progress",
+        text: "Working",
+      };
+      initialProgressPartIdRef.current = initialProgressPart.id;
+      assistantMessageRef.current = {
+        id: nextId(),
+        role: "assistant",
+        orderedParts: [initialProgressPart],
+        isComplete: false,
+        isStreaming: true,
+      };
+      setMessages((prev) => [...prev, userMsg, assistantMessageRef.current!]);
 
       try {
         const res = isRustAgentApi
