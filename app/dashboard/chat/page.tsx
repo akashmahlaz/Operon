@@ -25,11 +25,6 @@ import {
   ChevronLeft,
   Shield,
   PanelLeft,
-  Code2,
-  PenLine,
-  GraduationCap,
-  Coffee,
-  Mail,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -1250,36 +1245,15 @@ function ChatPage() {
 
         {/* ─── Messages ───────────────────────────────────────────── */}
         <div ref={messagesContainerRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <div className="mx-auto max-w-3xl px-4 py-6">
+          <div className="mx-auto max-w-4xl px-4 py-6">
             {messages.length === 0 && !conversationId && (
-              <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6">
-                {/* Greeting */}
-                <div className="flex items-center gap-3">
-                  <Sparkles className="size-9 shrink-0 text-primary" />
-                  <h1 className="font-heading text-[32px] font-semibold tracking-tight text-foreground sm:text-[40px]">
-                    {getGreeting()}, {userName}
-                  </h1>
-                </div>
-                {/* Suggestion chips */}
-                <div className="flex flex-wrap justify-center gap-2">
-                  {[
-                    { icon: Code2, label: "Code" },
-                    { icon: PenLine, label: "Write" },
-                    { icon: GraduationCap, label: "Learn" },
-                    { icon: Coffee, label: "Life stuff" },
-                    { icon: Mail, label: "From Gmail" },
-                  ].map(({ icon: Icon, label }) => (
-                    <button
-                      key={label}
-                      type="button"
-                      onClick={() => setInput(label === "Code" ? "Help me write code for " : label === "Write" ? "Write a " : label === "Learn" ? "Explain " : label === "Life stuff" ? "Help me with " : "Summarise my last 5 emails")}
-                      className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm text-foreground/80 shadow-xs transition-all hover:border-primary/40 hover:bg-accent hover:text-foreground"
-                    >
-                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex min-h-[60vh] flex-col justify-center gap-3 py-12">
+                <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
+                  {getGreeting()}, {userName}
+                </h1>
+                <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">
+                  What can I help with?
+                </p>
               </div>
             )}
 
@@ -1350,7 +1324,7 @@ function ChatPage() {
 
         {/* ─── Input ───── */}
         <div className="shrink-0 bg-linear-to-t from-background via-background to-transparent px-4 pb-3 pt-2">
-          <div className="relative mx-auto max-w-3xl">
+          <div className="relative mx-auto max-w-4xl">
             {/* Token usage + Compact (Copilot-parity for long sessions) */}
             <ConversationStatusBar
               messages={chatMessages as StreamingMessage[]}

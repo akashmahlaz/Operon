@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ChevronRight, Circle, Copy } from "lucide-react";
+import { Check, ChevronRight, Circle, Copy, UserRound } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { OperonMark } from "@/components/brand";
 import { cn } from "@/lib/utils";
@@ -69,6 +69,14 @@ function AssistantAvatar() {
   );
 }
 
+function UserAvatar() {
+  return (
+    <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/35 text-muted-foreground">
+      <UserRound className="size-3.5" />
+    </div>
+  );
+}
+
 function StreamingDots() {
   return (
     <span className="inline-flex items-center gap-1" aria-label="Generating">
@@ -101,7 +109,7 @@ function derivePersistedThinkingTitle(tools: ToolCallPart[], hasReasoning: boole
   }
 
   if (!tools.length) {
-    return { title: hasReasoning ? "Thought" : "Working" };
+    return { title: hasReasoning ? "Thought" : "Done" };
   }
 
   if (tools.length === 1) {
@@ -137,17 +145,17 @@ function AssistantThinkingRun({
   if (!hasReasoning && !hasTools && !active) return null;
 
   return (
-    <div className="my-1 text-muted-foreground">
+    <div className="my-0.5 text-muted-foreground">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="group/thinking inline-flex max-w-full items-center gap-1.5 py-0.5 text-[13px] leading-none text-muted-foreground transition-colors hover:text-foreground"
+        className="group/thinking inline-flex max-w-full items-center gap-1.5 py-0.5 text-[12.5px] leading-none text-muted-foreground transition-colors hover:text-foreground"
         aria-expanded={open}
       >
         {active ? (
           <ActivePulseDot />
         ) : (
-          <Check className="size-3 text-muted-foreground/75" />
+          <Check className="size-3 text-muted-foreground/70" />
         )}
         <span className={cn("truncate", active && "font-medium text-foreground/85")}>{title.title}</span>
         {title.detail && (
@@ -169,7 +177,7 @@ function AssistantThinkingRun({
             aria-hidden
             className="absolute left-1.25 -top-1 h-5 w-3 rounded-bl-[5px] border-l border-b border-muted-foreground/45 dark:border-border/80"
           />
-          {hasReasoning && <ReasoningPart text={reasoningText} streaming={streaming} className="pl-6" />}
+          {hasReasoning && <ReasoningPart text={reasoningText} streaming={streaming} className="pl-5" />}
           <ToolPartList tools={tools} />
           {active && !hasReasoning && (
             <div className="relative py-1 pl-6 text-[12.5px] text-muted-foreground/80">
@@ -193,7 +201,7 @@ function PendingAssistantMessage({ thinking, isStreaming }: { thinking?: string;
   // Render the assistant placeholder immediately so the UI is streaming-shaped
   // (per AI SDK Streaming UI guidance) even before the first chunk arrives.
   return (
-    <div className="flex max-w-3xl items-start gap-2.5 py-3">
+    <div className="flex max-w-4xl items-start gap-2.5 py-3">
       <AssistantAvatar />
       <div className="min-w-0 flex-1">
         {thinking ? (
@@ -223,9 +231,12 @@ function UserMessage({ message }: { message: ChatDisplayMessage }) {
   const { text, attachments } = parseMessageContent(message.content);
 
   return (
-    <div className="group flex flex-col items-end gap-1.5 py-2">
-      <FilePartList attachments={attachments} />
-      <TextPart text={text} isUser />
+    <div className="group flex max-w-4xl items-start gap-2.5 py-3">
+      <UserAvatar />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <FilePartList attachments={attachments} />
+        <TextPart text={text} isUser />
+      </div>
     </div>
   );
 }
@@ -236,7 +247,7 @@ function AssistantMessage({ message, isLast, isLoading }: { message: ChatDisplay
   const showWaitingForText = isStreamingThis && !message.content;
 
   return (
-    <div className="group flex max-w-3xl items-start gap-2.5 py-3">
+    <div className="group flex max-w-4xl items-start gap-2.5 py-3">
       <AssistantAvatar />
       <div className="min-w-0 flex-1">
         <div className="space-y-2">

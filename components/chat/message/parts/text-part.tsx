@@ -76,7 +76,7 @@ export function TextPart({ text, isUser, streaming }: TextPartProps) {
 
   if (isUser) {
     return (
-      <div className="max-w-[82%] rounded-2xl rounded-tr-md bg-primary px-3.5 py-2 text-primary-foreground shadow-xs">
+      <div className="max-w-none rounded-md border border-border/60 bg-muted/35 px-3 py-2 text-foreground">
         <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed">
           {text}
         </p>

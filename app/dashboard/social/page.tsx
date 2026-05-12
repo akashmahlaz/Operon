@@ -34,7 +34,7 @@ const connectors: Connector[] = [
     name: "Instagram",
     description: "Use the same Meta connection for Instagram placements and audience targeting.",
     coverage: "Placement optimization",
-    href: "/dashboard/social/facebook",
+    href: "/dashboard/social/instagram",
     dependsOnMeta: true,
   },
   {
@@ -86,6 +86,15 @@ export default function SocialPage() {
   const [status, setStatus] = useState<MetaStatus>({ connected: false });
   const [loading, setLoading] = useState(true);
 
+  const priorityConnectors = useMemo(
+    () => connectors.filter((item) => item.id === "facebook" || item.id === "instagram"),
+    [],
+  );
+  const secondaryConnectors = useMemo(
+    () => connectors.filter((item) => item.id !== "facebook" && item.id !== "instagram"),
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -135,33 +144,38 @@ export default function SocialPage() {
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-7xl space-y-6">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {connectors.map((connector) => {
+          <div className="grid min-h-screen gap-5 lg:grid-cols-2">
+            {priorityConnectors.map((connector) => {
               const isConnected = status.connected && (connector.id === "facebook" || connector.dependsOnMeta);
               const isActionable = Boolean(connector.href);
 
               return (
                 <div
                   key={connector.id}
-                  className="flex min-h-48 flex-col justify-between rounded-2xl border border-border/70 bg-card/70 p-5"
+                  className="flex min-h-168 flex-col justify-between rounded-3xl border border-border/70 bg-card/80 p-7"
                 >
                   <div>
-                    <div className="mb-3 inline-flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <div className="mb-4 inline-flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
                       {connector.id === "facebook" ? <Megaphone className="size-4" /> : <Layers2 className="size-4" />}
                     </div>
-                    <p className="text-sm font-semibold text-foreground">{connector.name}</p>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{connector.description}</p>
+                    <p className="text-lg font-semibold text-foreground">{connector.name}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{connector.description}</p>
+                    <div className="mt-5 rounded-xl border border-border/70 bg-background/80 p-4 text-sm text-muted-foreground">
+                      {connector.id === "facebook"
+                        ? "Best for campaign management, ad set creation, budget optimization, and direct action from AI."
+                        : "Best for placements, reels-driven growth loops, and creative testing from one AI command flow."}
+                    </div>
                   </div>
-                  <div className="mt-4 space-y-2">
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{connector.coverage}</div>
+                  <div className="mt-6 space-y-3">
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">{connector.coverage}</div>
                     {isConnected ? (
-                      <div className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                      <div className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
                         <CheckCircle2 className="size-3.5" /> Connected
                       </div>
                     ) : isActionable ? (
-                      <Button asChild size="sm" className="w-full rounded-lg">
+                      <Button asChild size="lg" className="w-full rounded-xl">
                         <Link href={connector.href!}>
-                          Connect
+                          {connector.id === "facebook" ? "Open Facebook Connect Page" : "Open Instagram Connect Page"}
                           <ArrowUpRight className="ml-1.5 size-3.5" />
                         </Link>
                       </Button>
@@ -174,6 +188,46 @@ export default function SocialPage() {
                 </div>
               );
             })}
+          </div>
+
+          <div className="rounded-2xl border border-border/70 bg-card/50 p-6">
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold text-foreground">More Social Connectors</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Expand coverage after Facebook and Instagram are activated.
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {secondaryConnectors.map((connector) => {
+                const isActionable = Boolean(connector.href);
+                return (
+                  <div
+                    key={connector.id}
+                    className="flex min-h-44 flex-col justify-between rounded-2xl border border-border/70 bg-background/80 p-5"
+                  >
+                    <div>
+                      <div className="mb-3 inline-flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <Layers2 className="size-4" />
+                      </div>
+                      <p className="text-sm font-semibold text-foreground">{connector.name}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{connector.description}</p>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{connector.coverage}</div>
+                      {isActionable ? (
+                        <Button asChild size="sm" className="w-full rounded-lg">
+                          <Link href={connector.href!}>Open connector</Link>
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="w-full rounded-lg" disabled>
+                          Planned
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {status.connected && !loading ? (
@@ -200,6 +254,9 @@ export default function SocialPage() {
                     <div className="mt-1 text-foreground">
                       Campaign triage, budget recommendation, audience experimentation, and creative briefing.
                     </div>
+                  </div>
+                  <div className="rounded-xl border border-emerald-300/40 bg-emerald-50/40 p-4 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300 sm:col-span-2">
+                    AI control is active now. You can ask Operon to create ad sets, optimize spend, pause underperformers, and scale winners.
                   </div>
                 </div>
               </div>
