@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { asSchema } from "ai";
 import { buildAvailableTools, getToolStatuses, listToolDescriptors } from "@/lib/ai/tools/registry";
 
 const OPERON_API_URL =
@@ -41,13 +42,18 @@ export async function GET(req: NextRequest) {
     channels: d.channels ?? null,
   }));
 
-  const tools = Object.entries(builtTools).map(([name, t]) => ({
-    name,
-    description: (t as { description?: string }).description ?? "",
-    ...(includeSchemas
-      ? { inputSchema: (t as { inputSchema?: unknown }).inputSchema ?? null }
-      : {}),
-  }));
+  const tools = await Promise.all(
+    Object.entries(builtTools).map(async ([name, t]) => {
+      const inputSchema = (t as { inputSchema?: Parameters<typeof asSchema>[0] }).inputSchema;
+      return {
+        name,
+        description: (t as { description?: string }).description ?? "",
+        ...(includeSchemas
+          ? { inputSchema: inputSchema ? await asSchema(inputSchema).jsonSchema : null }
+          : {}),
+      };
+    }),
+  );
 
   return NextResponse.json({ descriptors, statuses, tools });
 }
