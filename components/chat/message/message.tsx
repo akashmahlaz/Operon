@@ -54,15 +54,6 @@ function AssistantAvatar() {
   );
 }
 
-function AssistantLabel() {
-  return (
-    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground/65">
-      <span>Operon</span>
-      <span className="h-px w-3 bg-border/70" />
-    </div>
-  );
-}
-
 function StreamingDots() {
   return (
     <span className="inline-flex items-center gap-1" aria-label="Generating">
@@ -80,7 +71,6 @@ function PendingAssistantMessage({ thinking, isStreaming }: { thinking?: string;
     <div className="flex max-w-3xl items-start gap-2.5 py-3">
       <AssistantAvatar />
       <div className="min-w-0 flex-1">
-        <AssistantLabel />
         {thinking ? (
           <ReasoningPart text={thinking} streaming={isStreaming} />
         ) : (
@@ -124,7 +114,6 @@ function AssistantMessage({ message, isLast, isLoading }: { message: ChatDisplay
     <div className="group flex max-w-3xl items-start gap-2.5 py-3">
       <AssistantAvatar />
       <div className="min-w-0 flex-1">
-        <AssistantLabel />
         <div className="space-y-2">
           {reasoningText && (
             <ReasoningPart text={reasoningText} streaming={isStreamingThis} />

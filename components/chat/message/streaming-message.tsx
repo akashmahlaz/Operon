@@ -5,6 +5,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { describeTool } from "@/components/chat/message/parts/tool-part";
+import { CodeHighlight } from "@/components/chat/message/parts/code-highlight";
 import type {
   StreamingMessage,
   StreamPart,
@@ -22,11 +23,10 @@ import type {
   WarningEvent,
   UsageEvent,
 } from "@/hooks/use-stream-events/types";
-import { TOOL_STATE_LABELS } from "@/hooks/use-stream-events/types";
 import {
   AlertCircle,
   AlertTriangle,
-  Brain,
+  Circle,
   Check,
   Copy,
   ExternalLink,
@@ -47,6 +47,10 @@ import {
   Workflow,
   ChevronRight,
   FileText,
+  RotateCw,
+  Share2,
+  ThumbsDown,
+  ThumbsUp,
 } from "lucide-react";
 
 const TOOL_ICONS: Record<string, typeof FileText> = {
@@ -117,20 +121,7 @@ function useElapsedTimer(isActive: boolean) {
 }
 
 // ---------------------------------------------------------------------------
-// StreamingDots — the three bouncing dots shown while waiting
-// ---------------------------------------------------------------------------
-function StreamingDots({ label = "Generating…" }: { label?: string }) {
-  return (
-    <span className="inline-flex items-center gap-1" aria-label={label}>
-      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.3s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.15s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70" />
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ToolIcon — picks an icon based on tool name + state
+// ToolIcon - picks an icon based on tool name + state
 // ---------------------------------------------------------------------------
 function ToolIcon({
   toolName,
@@ -165,7 +156,6 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
     event.state
   );
   const isError = event.state === "output-error";
-  const isDone = !isPending && !isError;
 
   // Prefer Copilot-style messages when present, otherwise fall back to the
   // raw tool name + an extracted detail.
@@ -180,84 +170,66 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
     ? invocationMessage ?? fallbackMsg
     : (pastTenseMessage ?? invocationMessage ?? fallbackMsg);
 
-  // Extract a short mono "target" (path / repo / query / cmd) for the inline subtitle
-  const a = (event.args ?? {}) as Record<string, unknown>;
-  const pickStr = (...keys: string[]) => {
-    for (const k of keys) {
-      const v = a[k];
-      if (typeof v === "string" && v.length) return v;
+  // Optional inline result-count suffix (Copilot style: "…, 12 results")
+  const suffix = (() => {
+    if (isPending || isError || event.result == null) return undefined;
+    const r = event.result as unknown;
+    if (Array.isArray(r)) return `, ${r.length} ${r.length === 1 ? "result" : "results"}`;
+    if (typeof r === "object" && r !== null) {
+      const obj = r as Record<string, unknown>;
+      for (const key of ["results", "items", "matches", "rows", "data"]) {
+        const v = obj[key];
+        if (Array.isArray(v)) {
+          return `, ${v.length} ${v.length === 1 ? "result" : "results"}`;
+        }
+      }
     }
     return undefined;
-  };
-  const repo =
-    typeof a.owner === "string" && typeof a.repo === "string"
-      ? `${a.owner}/${a.repo}`
-      : undefined;
-  const target =
-    pickStr("path", "filePath", "filename", "url") ??
-    repo ??
-    pickStr("query", "search", "q", "command", "cmd");
-  const targetShort = target
-    ? target.length > 64
-      ? `…${target.slice(-63)}`
-      : target
-    : undefined;
+  })();
+
+  const hasDetails =
+    (event.args !== undefined && event.args !== null) ||
+    event.result !== undefined ||
+    !!event.errorText;
 
   return (
-    <div className="group/tool">
+    <div className="group/tool relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full max-w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors hover:bg-muted/50"
+        onClick={() => hasDetails && setOpen((v) => !v)}
+        disabled={!hasDetails}
+        className={cn(
+          "flex w-full max-w-full items-start gap-2.5 py-1 text-left text-[13px] text-muted-foreground transition-colors",
+          hasDetails && "hover:text-foreground/80",
+          "disabled:cursor-default",
+        )}
       >
-        <span
-          className={cn(
-            "flex size-5 shrink-0 items-center justify-center rounded-md border",
-            isPending && "border-primary/30 bg-primary/5",
-            isDone && "border-border/60 bg-muted/40",
-            isError && "border-destructive/40 bg-destructive/5",
-          )}
-        >
+        <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
           <ToolIcon toolName={event.toolName} state={event.state} />
         </span>
-        <span
-          className={cn(
-            "min-w-0 truncate font-medium text-foreground/90",
-            isError && "text-destructive",
-          )}
-        >
-          {msg ?? describeTool(event.toolName, event.args)}
-        </span>
-        {targetShort && (
-          <span className="min-w-0 truncate font-mono text-[11.5px] text-muted-foreground/80">
-            {targetShort}
-          </span>
-        )}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {isError && (
-            <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
-              Error
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={cn("truncate", isError && "text-destructive")}>
+              {msg ?? describeTool(event.toolName, event.args)}
+              {suffix && <span className="text-muted-foreground/70">{suffix}</span>}
             </span>
-          )}
-          {isPending && (
-            <span className="text-[10.5px] font-medium uppercase tracking-wide text-primary/70">
-              {TOOL_STATE_LABELS[event.state] ?? "Running"}
-            </span>
-          )}
-          <ChevronRight
-            className={cn(
-              "size-3 text-muted-foreground/60 transition-transform",
-              open && "rotate-90",
+            {hasDetails && (
+              <ChevronRight
+                className={cn(
+                  "ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform",
+                  open && "rotate-90",
+                )}
+              />
             )}
-          />
-        </span>
+          </div>
+        </div>
       </button>
 
-      {open && (
-        <div className="mt-1 ml-7 rounded-md border border-border/60 bg-muted/30 p-2 text-[11px]">
-          {event.args !== undefined && (
-            <div className="mb-1">
-              <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
+      {open && hasDetails && (
+        <div className="ml-6 mt-1 mb-1 space-y-2 border-l border-border/60 pl-3 text-[11px]">
+          {event.args !== undefined && event.args !== null && (
+            <div>
+              <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/55">
                 Input
               </div>
               <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-foreground/80">
@@ -266,7 +238,7 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
             </div>
           )}
           {event.errorText && (
-            <div className="mb-1">
+            <div>
               <div className="mb-0.5 flex items-center justify-between">
                 <span className="font-mono text-[10px] uppercase tracking-wider text-destructive/80">
                   Error
@@ -294,7 +266,7 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
           )}
           {event.result !== undefined && !event.errorText && (
             <div>
-              <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
+              <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/55">
                 Output
               </div>
               <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-foreground/80">
@@ -466,10 +438,28 @@ function UsageBadge({ ev }: { ev: UsageEvent }) {
 function ToolCallList({ events, onRetry }: { events: ToolCallEvent[]; onRetry?: (ev: ToolCallEvent) => void }) {
   if (!events.length) return null;
   return (
-    <div className="rounded-lg border border-border/60 bg-card/40 p-1">
-      {events.map((ev, i) => (
-        <ToolCallItem key={`${ev.toolCallId}-${i}`} event={ev} onRetry={onRetry} />
-      ))}
+    <div className="relative ml-0.5 border-l border-border/70 pl-3">
+      {events.map((ev, i) => {
+        const active = ["calling", "input-streaming", "input-available", "executing"].includes(ev.state);
+        const error = ev.state === "output-error";
+        return (
+          <div key={`${ev.toolCallId}-${i}`} className="relative">
+            <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
+              <Circle
+                className={cn(
+                  "size-1.5",
+                  error
+                    ? "fill-destructive text-destructive"
+                    : active
+                      ? "fill-primary text-primary animate-(--animate-pulse-soft)"
+                      : "fill-background text-border",
+                )}
+              />
+            </span>
+            <ToolCallItem event={ev} onRetry={onRetry} />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -480,95 +470,46 @@ function ToolCallList({ events, onRetry }: { events: ToolCallEvent[]; onRetry?: 
 function ReasoningBlock({
   reasoningEvents,
   isStreaming,
-  activeToolNames,
 }: {
   reasoningEvents: ReasoningPartEvent[];
   isStreaming: boolean;
   activeToolNames?: string[];
 }) {
-  const [open, setOpen] = useState(false);
   const text = reasoningEvents
     .filter((e) => e.type === "reasoning-delta")
     .map((e) => e.text)
     .join("")
     .trim();
   const elapsed = useElapsedTimer(isStreaming);
-  const wasStreaming = useRef(false);
-
-  // Auto-collapse the moment streaming finishes so the answer takes focus.
-  useEffect(() => {
-    if (isStreaming) {
-      wasStreaming.current = true;
-    } else if (wasStreaming.current) {
-      setOpen(false);
-      wasStreaming.current = false;
-    }
-  }, [isStreaming]);
-
-  const effectiveOpen = isStreaming ? true : open;
+  const [open, setOpen] = useState(true);
 
   if (!text && !isStreaming) return null;
 
-  const header = isStreaming
-    ? `Thinking${elapsed > 0 ? ` · ${elapsed}s` : "…"}`
-    : `Thought${elapsed > 0 ? ` for ${elapsed}s` : ""}`;
-  const subtitle = isStreaming && activeToolNames && activeToolNames.length > 0 ? activeToolNames[0] : undefined;
-
+  // Copilot-style: reasoning streams live inline, no pill/no auto-collapse.
+  // After streaming, a tiny "Thought · Ns" footer lets the user fold it.
   return (
     <div className="text-muted-foreground">
-      <button
-        type="button"
-        onClick={() => !isStreaming && setOpen((v) => !v)}
-        disabled={isStreaming}
-        className={cn(
-          "group/reasoning inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] font-medium text-muted-foreground/85 transition-colors",
-          !isStreaming && "hover:bg-muted/60 hover:text-foreground",
-          isStreaming && "cursor-default",
-        )}
-      >
-        <Brain
-          className={cn(
-            "size-3.5 text-muted-foreground/70",
-            isStreaming && "animate-(--animate-pulse-soft) text-primary/80",
-          )}
-        />
-        <span>{header}</span>
-        {subtitle && (
-          <span className="hidden text-muted-foreground/60 sm:inline">
-            · {subtitle}
-          </span>
-        )}
-        {!isStreaming && (
-          <svg
-            className={cn(
-              "size-3 text-muted-foreground/60 transition-transform",
-              effectiveOpen && "rotate-180",
+      {open && (
+        <div className="border-l-2 border-border/70 pl-3">
+          <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/85">
+            {text}
+            {isStreaming && (
+              <span className="ml-0.5 inline-block h-3 w-0.5 translate-y-0.5 rounded-sm bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
             )}
-            viewBox="0 0 16 16"
-            fill="none"
-          >
-            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </button>
-
-      <div
-        className={cn(
-          "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
-          effectiveOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
-        )}
-      >
-        <div className="overflow-hidden">
-          <div className="ml-2 mt-1.5 border-l-2 border-border/70 pl-3">
-            <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/80">
-              {text}
-              {isStreaming && (
-                <span className="ml-0.5 inline-block h-3 w-0.5 translate-y-0.5 rounded-sm bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
-              )}
-            </p>
-          </div>
+          </p>
         </div>
-      </div>
+      )}
+      {!isStreaming && elapsed > 0 && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+        >
+          <span>{open ? "Thought" : "Show thinking"}</span>
+          <span>·</span>
+          <span>{elapsed}s</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -582,12 +523,10 @@ function CodeBlockFenced({ code, lang }: { code: string; lang: string }) {
   const looksLikeCode =
     !!lang && !["text", "txt", "plaintext", "log", "output"].includes(lang.toLowerCase());
   return (
-    <div className="group/code relative my-2 overflow-hidden rounded-xl bg-[hsl(220,13%,14%)] text-[hsl(220,14%,90%)] ring-1 ring-white/10">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-2">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-white/40">
-          {lang || "code"}
-        </span>
-        <div className="flex items-center gap-3">
+    <div className="group/code relative my-2 overflow-hidden rounded-lg border border-border/60 bg-muted/40">
+      <div className="flex items-center justify-between border-b border-border/50 px-3 py-1 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground/80">
+        <span>{lang || "code"}</span>
+        <div className="flex items-center gap-1">
           {looksLikeCode && (
             <button
               onClick={() => {
@@ -597,8 +536,8 @@ function CodeBlockFenced({ code, lang }: { code: string; lang: string }) {
                 setApplied(true);
                 setTimeout(() => setApplied(false), 2000);
               }}
-              className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white/70"
-              title="Apply this code (dispatches copilot:apply-code event)"
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+              title="Apply this code"
             >
               {applied ? (
                 <><Check className="size-3" /> Applied</>
@@ -613,7 +552,7 @@ function CodeBlockFenced({ code, lang }: { code: string; lang: string }) {
               setCopied(true);
               setTimeout(() => setCopied(false), 2000);
             }}
-            className="flex items-center gap-1 text-[10px] text-white/40 transition-colors hover:text-white/70"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
           >
             {copied ? (
               <><Check className="size-3" /> Copied</>
@@ -623,9 +562,7 @@ function CodeBlockFenced({ code, lang }: { code: string; lang: string }) {
           </button>
         </div>
       </div>
-      <pre className="overflow-x-auto p-4 text-[13px] leading-relaxed">
-        <code className="font-mono">{code}</code>
-      </pre>
+      <CodeHighlight code={code} lang={lang} />
     </div>
   );
 }
@@ -802,29 +739,7 @@ function StreamingText({ text, isStreaming }: { text: string; isStreaming: boole
 }
 
 // ---------------------------------------------------------------------------
-// AssistantAvatar + AssistantLabel — shared UI elements
-// ---------------------------------------------------------------------------
-function AssistantAvatar() {
-  return (
-    <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center">
-      <svg viewBox="0 0 24 24" className="size-4.5 text-foreground fill-current">
-        <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8 8 3.589 8 8-3.589 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
-      </svg>
-    </div>
-  );
-}
-
-function AssistantLabel() {
-  return (
-    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-normal text-muted-foreground/65">
-      <span>Operon</span>
-      <span className="h-px w-3 bg-border/70" />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// UserMessage — right-aligned bubble (no label)
+// UserMessage - right-aligned bubble (no label)
 // ---------------------------------------------------------------------------
 function UserMessage({ text }: { text: string }) {
   return (
@@ -839,39 +754,7 @@ function UserMessage({ text }: { text: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// SystemMessage — centered system message pill
-// ---------------------------------------------------------------------------
-function SystemMessage({ text }: { text: string }) {
-  return (
-    <div className="flex justify-center py-1">
-      <span className="rounded-full bg-muted/60 px-3 py-1 text-[11px] text-muted-foreground">
-        {text}
-      </span>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// CopyButton — copy text content
-// ---------------------------------------------------------------------------
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }}
-      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-    >
-      {copied ? <Check className="size-3.5" /> : null}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// StreamingAssistantMessage — Copilot-style: full width, no avatar, no label
+// StreamingAssistantMessage - Copilot-style: full width, no avatar, no label
 // ---------------------------------------------------------------------------
 function StreamingAssistantMessage({
   message,
@@ -994,30 +877,66 @@ function MessageToolbar({
   onRegenerate?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+  const [shared, setShared] = useState(false);
+
+  const btn = "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+
   return (
-    <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100">
+    <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100">
       <button
         onClick={() => {
           void navigator.clipboard.writeText(text);
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         }}
-        title="Copy"
-        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        title={copied ? "Copied" : "Copy"}
+        aria-label="Copy message"
+        className={btn}
       >
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        {copied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
       </button>
       {onRegenerate && (
         <button
           onClick={onRegenerate}
           title="Regenerate"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          aria-label="Regenerate response"
+          className={btn}
         >
-          <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M2 8a6 6 0 1 0 1.76-4.24M2 3v3.5h3.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <RotateCw className="size-3.5" />
         </button>
       )}
+      <span className="mx-1 h-4 w-px bg-border/60" aria-hidden />
+      <button
+        onClick={() => setFeedback((f) => (f === "up" ? null : "up"))}
+        title="Good response"
+        aria-label="Good response"
+        aria-pressed={feedback === "up"}
+        className={cn(btn, feedback === "up" && "bg-accent text-primary")}
+      >
+        <ThumbsUp className="size-3.5" />
+      </button>
+      <button
+        onClick={() => setFeedback((f) => (f === "down" ? null : "down"))}
+        title="Bad response"
+        aria-label="Bad response"
+        aria-pressed={feedback === "down"}
+        className={cn(btn, feedback === "down" && "bg-accent text-destructive")}
+      >
+        <ThumbsDown className="size-3.5" />
+      </button>
+      <button
+        onClick={() => {
+          void navigator.clipboard.writeText(text);
+          setShared(true);
+          setTimeout(() => setShared(false), 1500);
+        }}
+        title={shared ? "Link copied" : "Share"}
+        aria-label="Share message"
+        className={btn}
+      >
+        {shared ? <Check className="size-3.5 text-emerald-600" /> : <Share2 className="size-3.5" />}
+      </button>
     </div>
   );
 }

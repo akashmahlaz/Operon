@@ -75,9 +75,11 @@ const connectors: Connector[] = [
   },
 ];
 
-function authHeaders() {
+function authHeaders(extra?: Record<string, string>) {
+  const headers = new Headers(extra);
   const token = operonToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return headers;
 }
 
 export default function SocialPage() {
@@ -176,7 +178,7 @@ export default function SocialPage() {
 
           {status.connected && !loading ? (
             <div className="grid min-h-screen gap-4 lg:grid-cols-2">
-              <div className="flex min-h-[42rem] flex-col rounded-2xl border border-border/70 bg-card/60 p-6">
+              <div className="flex min-h-168 flex-col rounded-2xl border border-border/70 bg-card/60 p-6">
                 <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <Sparkles className="size-4 text-primary" />
                   Connected Channel Intelligence
@@ -202,7 +204,7 @@ export default function SocialPage() {
                 </div>
               </div>
 
-              <div className="flex min-h-[42rem] flex-col rounded-2xl border border-border/70 bg-card/60 p-6">
+              <div className="flex min-h-168 flex-col rounded-2xl border border-border/70 bg-card/60 p-6">
                 <div className="text-sm font-semibold text-foreground">Facebook Ads Workspace</div>
                 <p className="mt-2 text-sm text-muted-foreground">
                   Open the dedicated workspace to connect assets, inspect campaign insights, generate ad set blueprints, and execute pause/resume safely.

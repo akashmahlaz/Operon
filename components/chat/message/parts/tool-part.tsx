@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   AlertCircle,
   ChevronRight,
+  Circle,
   FileText,
   FolderOpen,
   GitBranch,
@@ -261,7 +262,6 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
   const [open, setOpen] = useState(false);
   const error = tool.state === "error" || tool.state === "output-error";
   const isPending = ["calling", "input-streaming", "input-available", "executing"].includes(tool.state);
-  const isDone = !isPending && !error;
 
   const fallbackLabel = describeTool(tool.toolName, tool.args);
   const invocationMessage = isRawToolMessage(tool.invocationMessage, tool.toolName)
@@ -289,7 +289,7 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
     asString(a.cmd);
   const targetShort = target
     ? target.length > 64
-      ? `…${target.slice(-63)}`
+      ? `...${target.slice(-61)}`
       : target
     : undefined;
 
@@ -303,57 +303,34 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
         onClick={() => hasDetails && setOpen((v) => !v)}
         disabled={!hasDetails}
         className={cn(
-          "flex w-full max-w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors",
-          hasDetails && "hover:bg-muted/50",
+          "flex w-full max-w-full items-start gap-2.5 py-1 text-left text-[13px] text-muted-foreground transition-colors",
+          hasDetails && "hover:text-foreground/80",
           "disabled:cursor-default",
         )}
       >
-        <span
-          className={cn(
-            "flex size-5 shrink-0 items-center justify-center rounded-md border",
-            isPending && "border-primary/30 bg-primary/5",
-            isDone && "border-border/60 bg-muted/40",
-            error && "border-destructive/40 bg-destructive/5",
-          )}
-        >
+        <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
           <ToolIcon toolName={tool.toolName} state={tool.state} />
         </span>
-
-        <span
-          className={cn(
-            "min-w-0 truncate font-medium text-foreground/90",
-            error && "text-destructive",
-          )}
-        >
-          {label}
-        </span>
-
-        {targetShort && (
-          <span className="min-w-0 truncate font-mono text-[11.5px] text-muted-foreground/80">
-            {targetShort}
-          </span>
-        )}
-
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {error && (
-            <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
-              Error
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={cn("truncate", error && "text-destructive")}>
+              {label}
             </span>
-          )}
-          {isPending && (
-            <span className="text-[10.5px] font-medium uppercase tracking-wide text-primary/70">
-              Running
-            </span>
-          )}
-          {hasDetails && (
-            <ChevronRight
-              className={cn(
-                "size-3 text-muted-foreground/60 transition-transform",
-                open && "rotate-90",
-              )}
-            />
-          )}
-        </span>
+            {targetShort && (
+              <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/50">
+                {targetShort}
+              </span>
+            )}
+            {hasDetails && (
+              <ChevronRight
+                className={cn(
+                  "ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform",
+                  open && "rotate-90",
+                )}
+              />
+            )}
+          </div>
+        </div>
       </button>
 
       <div
@@ -363,7 +340,7 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
         )}
       >
         <div className="overflow-hidden">
-          <div className="ml-7 mt-1 mb-1 space-y-2 border-l border-border/60 pl-3">
+          <div className="ml-6 mt-1 mb-1 space-y-2 border-l border-border/60 pl-3">
             {tool.args && Object.keys(tool.args).length > 0 && (
               <div>
                 <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
@@ -412,21 +389,39 @@ export function ToolPartList({ tools }: { tools: ToolCallPart[] }) {
   const hidden = tools.length - visible.length;
 
   return (
-    <div className="rounded-lg border border-border/60 bg-card/40 p-1">
+    <div className="relative ml-0.5 border-l border-border/70 pl-3">
       {collapsible && !expanded && hidden > 0 && (
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground/80 transition-colors hover:bg-muted/40 hover:text-foreground"
+          className="mb-0.5 flex items-center gap-1 text-[11.5px] text-muted-foreground/70 transition-colors hover:text-foreground"
         >
           <ChevronRight className="size-3" />
           <span>Show {hidden} earlier {hidden === 1 ? "step" : "steps"}</span>
         </button>
       )}
 
-      {visible.map((tool, index) => (
-        <ToolPart key={`${tool.toolName}-${index}`} tool={tool} />
-      ))}
+      {visible.map((tool, index) => {
+        const active = ["calling", "input-streaming", "input-available", "executing"].includes(tool.state);
+        const error = tool.state === "error" || tool.state === "output-error";
+        return (
+          <div key={`${tool.toolName}-${index}`} className="relative">
+            <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
+              <Circle
+                className={cn(
+                  "size-1.5",
+                  error
+                    ? "fill-destructive text-destructive"
+                    : active
+                      ? "fill-primary text-primary animate-(--animate-pulse-soft)"
+                      : "fill-background text-border",
+                )}
+              />
+            </span>
+            <ToolPart tool={tool} />
+          </div>
+        );
+      })}
     </div>
   );
 }
