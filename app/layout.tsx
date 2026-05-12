@@ -5,6 +5,7 @@ import { SessionProvider } from "@/components/ui/session-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
+
 const jakarta = Plus_Jakarta_Sans({
   variable: "--font-jakarta",
   subsets: ["latin"],
