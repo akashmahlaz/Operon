@@ -9,11 +9,7 @@ interface ReasoningPartProps {
   className?: string;
 }
 
-/**
- * Copilot-style inline reasoning:
- * Copilot-style inline reasoning: live prose with a left bar while streaming,
- * then the same quiet block after completion.
- */
+/** Copilot-style inline reasoning: live prose with a left bar while streaming. */
 export function ReasoningPart({ text, streaming, className }: ReasoningPartProps) {
   const [open, setOpen] = useState(true);
   const [elapsed, setElapsed] = useState(0);
@@ -34,7 +30,7 @@ export function ReasoningPart({ text, streaming, className }: ReasoningPartProps
   return (
     <div className={cn("text-muted-foreground", className)}>
       {open && (
-        <div className="border-l-2 border-border/70 pl-3">
+        <div className="border-l-2 border-muted-foreground/35 pl-3 dark:border-border/75">
           <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/85">
             {text}
             {streaming && (

@@ -1,16 +1,31 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, ChevronRight, Circle, Copy } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { OperonMark } from "@/components/brand";
-import type { ChatDisplayMessage, ParsedAttachment } from "@/components/chat/message/types";
+import { cn } from "@/lib/utils";
+import type { ChatDisplayMessage, ParsedAttachment, ToolCallPart } from "@/components/chat/message/types";
 import { FilePartList } from "@/components/chat/message/parts/file-part";
 import { ReasoningPart } from "@/components/chat/message/parts/reasoning-part";
 import { TextPart } from "@/components/chat/message/parts/text-part";
-import { ToolPartList } from "@/components/chat/message/parts/tool-part";
+import { describeTool, ToolPartList } from "@/components/chat/message/parts/tool-part";
 
 const ATTACHMENT_RE = /\[(Image|File):\s*([^\]]+)\]\(([^)]+)\)/g;
+const ACTIVE_TOOL_STATES = ["calling", "input-streaming", "input-available", "executing"] as const;
+
+function isActiveToolState(state: string) {
+  return ACTIVE_TOOL_STATES.includes(state as (typeof ACTIVE_TOOL_STATES)[number]);
+}
+
+function ActivePulseDot() {
+  return (
+    <span className="relative flex size-3 items-center justify-center">
+      <span className="absolute size-2 rounded-full bg-primary/25 animate-ping" />
+      <Circle className="relative size-2 fill-primary text-primary animate-(--animate-pulse-soft)" />
+    </span>
+  );
+}
 
 function parseMessageContent(content: string): { text: string; attachments: ParsedAttachment[] } {
   const attachments: ParsedAttachment[] = [];
@@ -61,6 +76,116 @@ function StreamingDots() {
       <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-0.15s]" />
       <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70" />
     </span>
+  );
+}
+
+function isToolActive(tool: ToolCallPart) {
+  return isActiveToolState(tool.state);
+}
+
+function persistedToolLabel(tool: ToolCallPart) {
+  const fallback = describeTool(tool.toolName, tool.args);
+  const invocation = tool.invocationMessage?.includes(tool.toolName) ? undefined : tool.invocationMessage;
+  const past = tool.pastTenseMessage?.includes(tool.toolName) ? undefined : tool.pastTenseMessage;
+  return isToolActive(tool) ? invocation ?? fallback : past ?? invocation ?? fallback;
+}
+
+function derivePersistedThinkingTitle(tools: ToolCallPart[], hasReasoning: boolean, active: boolean) {
+  const activeTool = [...tools].reverse().find(isToolActive);
+
+  if (active) {
+    return {
+      title: tools.length || activeTool ? "Working" : "Thinking",
+      detail: activeTool ? persistedToolLabel(activeTool) : undefined,
+    };
+  }
+
+  if (!tools.length) {
+    return { title: hasReasoning ? "Thought" : "Working" };
+  }
+
+  if (tools.length === 1) {
+    return { title: persistedToolLabel(tools[0]) };
+  }
+
+  const allSearch = tools.every((tool) => /search|grep|find|list/i.test(tool.toolName));
+  const allRead = tools.every((tool) => /read|get_file|list_dir/i.test(tool.toolName));
+  if (allSearch) {
+    return { title: `Searched for ${tools.length} things` };
+  }
+  if (allRead) {
+    return { title: `Reviewed ${tools.length} files` };
+  }
+  return { title: `Finished with ${tools.length} steps` };
+}
+
+function AssistantThinkingRun({
+  reasoningText,
+  tools,
+  streaming,
+}: {
+  reasoningText: string;
+  tools: ToolCallPart[];
+  streaming: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  const hasReasoning = Boolean(reasoningText);
+  const hasTools = tools.length > 0;
+  const active = streaming || tools.some(isToolActive);
+  const title = derivePersistedThinkingTitle(tools, hasReasoning, active);
+
+  if (!hasReasoning && !hasTools && !active) return null;
+
+  return (
+    <div className="my-1 text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="group/thinking inline-flex max-w-full items-center gap-1.5 py-0.5 text-[13px] leading-none text-muted-foreground transition-colors hover:text-foreground"
+        aria-expanded={open}
+      >
+        {active ? (
+          <ActivePulseDot />
+        ) : (
+          <Check className="size-3 text-muted-foreground/75" />
+        )}
+        <span className={cn("truncate", active && "font-medium text-foreground/85")}>{title.title}</span>
+        {title.detail && (
+          <span className="min-w-0 truncate text-muted-foreground/65 animate-(--animate-pulse-soft)">
+            {title.detail}
+          </span>
+        )}
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 text-muted-foreground/45 transition-transform group-hover/thinking:text-muted-foreground",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+
+      {open && (
+        <div className="relative mt-1 space-y-1">
+          <span
+            aria-hidden
+            className="absolute left-1.25 -top-1 h-5 w-3 rounded-bl-[5px] border-l border-b border-muted-foreground/45 dark:border-border/80"
+          />
+          {hasReasoning && <ReasoningPart text={reasoningText} streaming={streaming} className="pl-6" />}
+          <ToolPartList tools={tools} />
+          {active && !hasReasoning && (
+            <div className="relative py-1 pl-6 text-[12.5px] text-muted-foreground/80">
+              <span
+                aria-hidden
+                className="absolute left-1.25 top-0 bottom-0 w-px bg-muted-foreground/55 dark:bg-border/85 mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]"
+              />
+              <span className="absolute left-0 top-2.5 flex size-3 items-center justify-center bg-background">
+                <ActivePulseDot />
+              </span>
+              <span className="animate-(--animate-pulse-soft)">{title.detail ?? title.title}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -115,10 +240,11 @@ function AssistantMessage({ message, isLast, isLoading }: { message: ChatDisplay
       <AssistantAvatar />
       <div className="min-w-0 flex-1">
         <div className="space-y-2">
-          {reasoningText && (
-            <ReasoningPart text={reasoningText} streaming={isStreamingThis} />
-          )}
-          <ToolPartList tools={message.toolCalls} />
+          <AssistantThinkingRun
+            reasoningText={reasoningText}
+            tools={message.toolCalls}
+            streaming={isStreamingThis}
+          />
           {message.content ? (
             <TextPart text={message.content} streaming={isStreamingThis} />
           ) : null}

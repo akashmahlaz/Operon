@@ -75,6 +75,21 @@ const TOOL_ICONS: Record<string, typeof FileText> = {
   github_save_token: GitBranch,
 };
 
+const ACTIVE_TOOL_STATES = ["calling", "input-streaming", "input-available", "executing"] as const;
+
+function isActiveToolState(state: string) {
+  return ACTIVE_TOOL_STATES.includes(state as (typeof ACTIVE_TOOL_STATES)[number]);
+}
+
+function ActivePulseDot() {
+  return (
+    <span className="relative flex size-3 items-center justify-center">
+      <span className="absolute size-2 rounded-full bg-primary/25 animate-ping" />
+      <Circle className="relative size-2 fill-primary text-primary animate-(--animate-pulse-soft)" />
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Per-tool invocation formatter.
 //   read_file({path:"foo.ts", start_line:308, end_line:320})
@@ -233,7 +248,7 @@ function ToolIcon({
   state: ToolCallPart["state"];
   className?: string;
 }) {
-  const pending = ["calling", "input-streaming", "input-available", "executing"].includes(state);
+  const pending = isActiveToolState(state);
   const error = state === "error" || state === "output-error";
 
   if (pending) {
@@ -261,7 +276,7 @@ function formatJson(v: unknown): string {
 export function ToolPart({ tool }: { tool: ToolCallPart }) {
   const [open, setOpen] = useState(false);
   const error = tool.state === "error" || tool.state === "output-error";
-  const isPending = ["calling", "input-streaming", "input-available", "executing"].includes(tool.state);
+  const isPending = isActiveToolState(tool.state);
 
   const fallbackLabel = describeTool(tool.toolName, tool.args);
   const invocationMessage = isRawToolMessage(tool.invocationMessage, tool.toolName)
@@ -389,7 +404,7 @@ export function ToolPartList({ tools }: { tools: ToolCallPart[] }) {
   const hidden = tools.length - visible.length;
 
   return (
-    <div className="relative ml-0.5 border-l border-border/70 pl-3">
+    <div className="relative ml-0.5 pl-3">
       {collapsible && !expanded && hidden > 0 && (
         <button
           type="button"
@@ -402,21 +417,37 @@ export function ToolPartList({ tools }: { tools: ToolCallPart[] }) {
       )}
 
       {visible.map((tool, index) => {
-        const active = ["calling", "input-streaming", "input-available", "executing"].includes(tool.state);
+        const active = isActiveToolState(tool.state);
         const error = tool.state === "error" || tool.state === "output-error";
+        const only = visible.length === 1;
+        const first = index === 0;
+        const last = index === visible.length - 1;
         return (
           <div key={`${tool.toolName}-${index}`} className="relative">
+            <span
+              aria-hidden
+              className={cn(
+                "absolute -left-3 top-0 bottom-0 w-px bg-muted-foreground/55 dark:bg-border/85",
+                only && !active && "hidden",
+                only && active && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]",
+                !only && first && "mask-[linear-gradient(to_bottom,transparent_0_20px,black_20px_100%)]",
+                !only && last && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_100%)]",
+                !only && !first && !last && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]",
+              )}
+            />
             <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
-              <Circle
-                className={cn(
-                  "size-1.5",
-                  error
-                    ? "fill-destructive text-destructive"
-                    : active
-                      ? "fill-primary text-primary animate-(--animate-pulse-soft)"
-                      : "fill-background text-border",
-                )}
-              />
+              {active && !error ? (
+                <ActivePulseDot />
+              ) : (
+                <Circle
+                  className={cn(
+                    "size-1.5",
+                    error
+                      ? "fill-destructive text-destructive"
+                      : "fill-background text-muted-foreground/70 dark:text-border",
+                  )}
+                />
+              )}
             </span>
             <ToolPart tool={tool} />
           </div>

@@ -96,6 +96,21 @@ const TOOL_ICONS: Record<string, typeof FileText> = {
   github_save_token: GitBranch,
 };
 
+const ACTIVE_TOOL_STATES = ["calling", "input-streaming", "input-available", "executing"] as const;
+
+function isActiveToolState(state: string) {
+  return ACTIVE_TOOL_STATES.includes(state as (typeof ACTIVE_TOOL_STATES)[number]);
+}
+
+function ActivePulseDot({ className }: { className?: string }) {
+  return (
+    <span className={cn("relative flex size-3 items-center justify-center", className)}>
+      <span className="absolute size-2 rounded-full bg-primary/25 animate-ping" />
+      <Circle className="relative size-2 fill-primary text-primary animate-(--animate-pulse-soft)" />
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Elapsed timer — tracks how long the reasoning block has been open
 // ---------------------------------------------------------------------------
@@ -130,9 +145,7 @@ function ToolIcon({
   toolName: string;
   state: ToolCallEvent["state"];
 }) {
-  const pending = ["calling", "input-streaming", "input-available", "executing"].includes(
-    state
-  );
+  const pending = isActiveToolState(state);
   const error = state === "output-error";
   const cls = error
     ? "size-3.5 text-destructive shrink-0"
@@ -438,23 +451,39 @@ function UsageBadge({ ev }: { ev: UsageEvent }) {
 function ToolCallList({ events, onRetry }: { events: ToolCallEvent[]; onRetry?: (ev: ToolCallEvent) => void }) {
   if (!events.length) return null;
   return (
-    <div className="relative ml-0.5 border-l border-border/70 pl-3">
+    <div className="relative ml-0.5 pl-3">
       {events.map((ev, i) => {
-        const active = ["calling", "input-streaming", "input-available", "executing"].includes(ev.state);
+        const active = isActiveToolState(ev.state);
         const error = ev.state === "output-error";
+        const only = events.length === 1;
+        const first = i === 0;
+        const last = i === events.length - 1;
         return (
           <div key={`${ev.toolCallId}-${i}`} className="relative">
+            <span
+              aria-hidden
+              className={cn(
+                "absolute -left-3 top-0 bottom-0 w-px bg-muted-foreground/55 dark:bg-border/85",
+                only && !active && "hidden",
+                only && active && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]",
+                !only && first && "mask-[linear-gradient(to_bottom,transparent_0_20px,black_20px_100%)]",
+                !only && last && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_100%)]",
+                !only && !first && !last && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]",
+              )}
+            />
             <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
-              <Circle
-                className={cn(
-                  "size-1.5",
-                  error
-                    ? "fill-destructive text-destructive"
-                    : active
-                      ? "fill-primary text-primary animate-(--animate-pulse-soft)"
-                      : "fill-background text-border",
-                )}
-              />
+              {active && !error ? (
+                <ActivePulseDot className="size-2" />
+              ) : (
+                <Circle
+                  className={cn(
+                    "size-1.5",
+                    error
+                      ? "fill-destructive text-destructive"
+                      : "fill-background text-muted-foreground/70 dark:text-border",
+                  )}
+                />
+              )}
             </span>
             <ToolCallItem event={ev} onRetry={onRetry} />
           </div>
@@ -470,10 +499,12 @@ function ToolCallList({ events, onRetry }: { events: ToolCallEvent[]; onRetry?: 
 function ReasoningBlock({
   reasoningEvents,
   isStreaming,
+  embedded = false,
 }: {
   reasoningEvents: ReasoningPartEvent[];
   isStreaming: boolean;
   activeToolNames?: string[];
+  embedded?: boolean;
 }) {
   const text = reasoningEvents
     .filter((e) => e.type === "reasoning-delta")
@@ -485,12 +516,25 @@ function ReasoningBlock({
 
   if (!text && !isStreaming) return null;
 
+  if (embedded) {
+    return (
+      <div className="py-1 pl-6 text-muted-foreground">
+        <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/85">
+          {text}
+          {isStreaming && (
+            <span className="ml-0.5 inline-block h-3 w-0.5 translate-y-0.5 rounded-sm bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
+          )}
+        </p>
+      </div>
+    );
+  }
+
   // Copilot-style: reasoning streams live inline, no pill/no auto-collapse.
   // After streaming, a tiny "Thought · Ns" footer lets the user fold it.
   return (
     <div className="text-muted-foreground">
       {open && (
-        <div className="border-l-2 border-border/70 pl-3">
+        <div className="border-l-2 border-muted-foreground/35 pl-3 dark:border-border/75">
           <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/85">
             {text}
             {isStreaming && (
@@ -509,6 +553,85 @@ function ReasoningBlock({
           <span>·</span>
           <span>{elapsed}s</span>
         </button>
+      )}
+    </div>
+  );
+}
+
+function ThinkingRun({
+  segments,
+  active,
+  onRetry,
+}: {
+  segments: ThinkingRunSegment[];
+  active: boolean;
+  onRetry?: (ev: ToolCallEvent) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const title = deriveThinkingRunTitle(segments, active);
+  const hasVisibleReasoning = segments.some(
+    (segment) => segment.kind === "reasoning" && segment.events.some((event) => event.type === "reasoning-delta" && event.text.trim()),
+  );
+
+  return (
+    <div className="my-1 text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="group/thinking inline-flex max-w-full items-center gap-1.5 py-0.5 text-[13px] leading-none text-muted-foreground transition-colors hover:text-foreground"
+        aria-expanded={open}
+      >
+        {active ? (
+          <ActivePulseDot />
+        ) : (
+          <Check className="size-3 text-muted-foreground/75" />
+        )}
+        <span className={cn("truncate", active && "font-medium text-foreground/85")}>{title.title}</span>
+        {title.detail && (
+          <span className="min-w-0 truncate text-muted-foreground/65 animate-(--animate-pulse-soft)">
+            {title.detail}
+          </span>
+        )}
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 text-muted-foreground/45 transition-transform group-hover/thinking:text-muted-foreground",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+
+      {open && (
+        <div className="relative mt-1 space-y-1">
+          <span
+            aria-hidden
+            className="absolute left-1.25 -top-1 h-5 w-3 rounded-bl-[5px] border-l border-b border-muted-foreground/45 dark:border-border/80"
+          />
+          {segments.map((segment, index) => {
+            if (segment.kind === "reasoning") {
+              return (
+                <ReasoningBlock
+                  key={`reasoning-${index}`}
+                  reasoningEvents={segment.events}
+                  isStreaming={active && index === segments.length - 1}
+                  embedded
+                />
+              );
+            }
+            return <ToolCallList key={`tools-${index}`} events={segment.tools} onRetry={onRetry} />;
+          })}
+          {active && !hasVisibleReasoning && (
+            <div className="relative py-1 pl-6 text-[12.5px] text-muted-foreground/80">
+              <span
+                aria-hidden
+                className="absolute left-1.25 top-0 bottom-0 w-px bg-muted-foreground/55 dark:bg-border/85 mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]"
+              />
+              <span className="absolute left-0 top-2.5 flex size-3 items-center justify-center bg-background">
+                <ActivePulseDot />
+              </span>
+              <span className="animate-(--animate-pulse-soft)">{title.detail ?? title.title}</span>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -626,6 +749,83 @@ type RenderSegment =
   | { kind: "confirmation"; ev: ConfirmationEvent }
   | { kind: "command-button"; ev: CommandButtonEvent }
   | { kind: "usage"; ev: UsageEvent };
+
+type ThinkingRunSegment = Extract<RenderSegment, { kind: "reasoning" } | { kind: "tools" }>;
+type RenderGroup = RenderSegment | { kind: "thinking-run"; segments: ThinkingRunSegment[] };
+
+function isThinkingRunSegment(seg: RenderSegment): seg is ThinkingRunSegment {
+  return seg.kind === "reasoning" || seg.kind === "tools";
+}
+
+function groupThinkingRuns(segments: RenderSegment[]): RenderGroup[] {
+  const groups: RenderGroup[] = [];
+  let current: ThinkingRunSegment[] = [];
+
+  for (const segment of segments) {
+    if (isThinkingRunSegment(segment)) {
+      current.push(segment);
+      continue;
+    }
+
+    if (current.length) {
+      groups.push({ kind: "thinking-run", segments: current });
+      current = [];
+    }
+    groups.push(segment);
+  }
+
+  if (current.length) {
+    groups.push({ kind: "thinking-run", segments: current });
+  }
+
+  return groups;
+}
+
+function toolMessage(event: ToolCallEvent): string {
+  const isPending = ["calling", "input-streaming", "input-available", "executing"].includes(event.state);
+  const fallback = describeTool(event.toolName, event.args);
+  const invocation = event.invocationMessage?.includes(event.toolName) ? undefined : event.invocationMessage;
+  const past = event.pastTenseMessage?.includes(event.toolName) ? undefined : event.pastTenseMessage;
+  return isPending ? invocation ?? fallback : past ?? invocation ?? fallback;
+}
+
+function thinkingRunTools(segments: ThinkingRunSegment[]) {
+  return segments.flatMap((segment) => segment.kind === "tools" ? segment.tools : []);
+}
+
+function isToolActive(tool: ToolCallEvent) {
+  return isActiveToolState(tool.state);
+}
+
+function deriveThinkingRunTitle(segments: ThinkingRunSegment[], active: boolean) {
+  const tools = thinkingRunTools(segments);
+  const activeTool = [...tools].reverse().find(isToolActive);
+
+  if (active) {
+    return {
+      title: tools.length || activeTool ? "Working" : "Thinking",
+      detail: activeTool ? toolMessage(activeTool) : undefined,
+    };
+  }
+
+  if (!tools.length) {
+    return { title: "Thought" };
+  }
+
+  if (tools.length === 1) {
+    return { title: toolMessage(tools[0]) };
+  }
+
+  const allSearch = tools.every((tool) => /search|grep|find|list/i.test(tool.toolName));
+  const allRead = tools.every((tool) => /read|get_file|list_dir/i.test(tool.toolName));
+  if (allSearch) {
+    return { title: `Searched for ${tools.length} things` };
+  }
+  if (allRead) {
+    return { title: `Reviewed ${tools.length} files` };
+  }
+  return { title: `Finished with ${tools.length} steps` };
+}
 
 function buildSegments(parts: StreamPart[]): RenderSegment[] {
   const segs: RenderSegment[] = [];
@@ -771,12 +971,13 @@ function StreamingAssistantMessage({
 }) {
   const isStreamingThis = isLoading && !message.isComplete;
   const segments = buildSegments(message.orderedParts);
+  const renderGroups = groupThinkingRuns(segments);
 
   // Active tool names for the reasoning header
   const activeToolNames = segments
     .flatMap((s) => (s.kind === "tools" ? s.tools : []))
     .filter((t) =>
-      ["calling", "input-streaming", "input-available", "executing"].includes(t.state)
+      isActiveToolState(t.state)
     )
     .map((t) => describeTool(t.toolName, t.args));
 
@@ -801,8 +1002,20 @@ function StreamingAssistantMessage({
       )}
 
       <div className="space-y-2">
-        {segments.map((seg, i) => {
-          const isLastSeg = isStreamingThis && i === segments.length - 1;
+        {renderGroups.map((seg, i) => {
+          const isLastSeg = isStreamingThis && i === renderGroups.length - 1;
+
+          if (seg.kind === "thinking-run") {
+            const hasActiveTool = thinkingRunTools(seg.segments).some(isToolActive);
+            return (
+              <ThinkingRun
+                key={i}
+                segments={seg.segments}
+                active={isLastSeg || hasActiveTool}
+                onRetry={onRetryTool}
+              />
+            );
+          }
 
           if (seg.kind === "reasoning") {
             return (
