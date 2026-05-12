@@ -85,6 +85,7 @@ export default function FacebookWorkspacePage() {
   const [status, setStatus] = useState<MetaStatus>({ connected: false });
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [oauthConnecting, setOauthConnecting] = useState(false);
   const [metaToken, setMetaToken] = useState("");
 
   const [accounts, setAccounts] = useState<MetaAccount[]>([]);
@@ -102,6 +103,21 @@ export default function FacebookWorkspacePage() {
   const [timeline, setTimeline] = useState<AiTimelineEvent[]>([]);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("connected") === "meta") {
+        toast.success("Meta OAuth connected");
+        params.delete("connected");
+        const next = params.toString();
+        window.history.replaceState({}, "", `${window.location.pathname}${next ? `?${next}` : ""}`);
+      } else if (params.get("error")) {
+        toast.error(`Meta OAuth failed: ${params.get("error")}`);
+        params.delete("error");
+        const next = params.toString();
+        window.history.replaceState({}, "", `${window.location.pathname}${next ? `?${next}` : ""}`);
+      }
+    }
+
     void refreshStatus();
   }, []);
 
@@ -217,6 +233,19 @@ export default function FacebookWorkspacePage() {
     } finally {
       setConnecting(false);
     }
+  }
+
+  function connectMetaOAuth() {
+    const token = operonToken();
+    if (!token) {
+      toast.error("Sign in required");
+      return;
+    }
+
+    setOauthConnecting(true);
+    const redirect = encodeURIComponent("/dashboard/social/facebook");
+    const authToken = encodeURIComponent(token);
+    window.location.href = `/api/social/meta/oauth/start?token=${authToken}&redirect=${redirect}`;
   }
 
   async function loadCampaigns(accountId: string) {
@@ -388,9 +417,22 @@ export default function FacebookWorkspacePage() {
               <div className="rounded-2xl border border-border/70 bg-card/70 p-6">
                 <h2 className="text-sm font-semibold text-foreground">Connect Facebook (Meta)</h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Paste a Meta user access token with ads scopes. Operon stores it securely and enables campaign operations.
+                  Connect with OAuth for a secure one-click setup, or paste an access token as fallback.
                 </p>
                 <div className="mt-5 space-y-3">
+                  <Button onClick={connectMetaOAuth} disabled={oauthConnecting} className="w-full">
+                    {oauthConnecting ? (
+                      <>
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                        Redirecting to Facebook OAuth
+                      </>
+                    ) : (
+                      "Connect with Facebook OAuth"
+                    )}
+                  </Button>
+
+                  <div className="text-center text-xs text-muted-foreground">or use access token</div>
+
                   <Input
                     value={metaToken}
                     onChange={(e) => setMetaToken(e.target.value)}

@@ -19,3 +19,19 @@ export async function resolveUserId(req: NextRequest): Promise<string | null> {
     return null;
   }
 }
+
+export async function resolveUserIdFromAccessToken(token: string): Promise<string | null> {
+  if (!token) return null;
+
+  try {
+    const res = await fetch(`${OPERON_API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const user = (await res.json()) as { id?: string };
+    return user.id ?? null;
+  } catch {
+    return null;
+  }
+}
