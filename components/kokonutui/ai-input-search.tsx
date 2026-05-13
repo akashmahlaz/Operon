@@ -229,17 +229,17 @@ export default function AI_Input_Search({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      disabled={disabled || isLoading || !reasoningSupported}
+                      disabled={disabled || isLoading}
                       className={cn(
                         "h-8 gap-1.5 rounded-full px-2.5 text-[13px] font-medium",
                         reasoningSupported
                           ? "text-foreground/80 hover:text-foreground"
-                          : "cursor-not-allowed text-muted-foreground/40",
+                          : "text-foreground/60 hover:text-foreground",
                       )}
                     >
                       <BrainCircuit className="size-3.5" />
                       <span className="hidden sm:inline">
-                        {reasoningSupported ? reasoningLabels[reasoningLevel] : "Thinking"}
+                        {reasoningLabels[reasoningLevel]}
                       </span>
                       <ChevronDown className="size-3 opacity-50" />
                     </Button>
@@ -248,7 +248,7 @@ export default function AI_Input_Search({
               </TooltipTrigger>
               {!reasoningSupported && (
                 <TooltipContent side="top">
-                  Thinking not supported by this model
+                  This model may ignore the thinking budget
                 </TooltipContent>
               )}
             </Tooltip>

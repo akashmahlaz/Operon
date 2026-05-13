@@ -213,6 +213,7 @@ pub async fn create_run(
         channel: channel.to_owned(),
         next_base_url: state.config.next_base_url.clone(),
         next_service_token,
+        reasoning_level: payload.reasoning_level.clone(),
     });
     state.agents.insert(handle);
 

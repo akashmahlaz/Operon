@@ -404,6 +404,9 @@ pub struct RunnerSpec {
     pub channel: String,
     pub next_base_url: String,
     pub next_service_token: String,
+    /// Reasoning effort hint forwarded to the provider. One of
+    /// "none" | "auto" | "low" | "medium" | "high".
+    pub reasoning_level: Option<String>,
 }
 
 pub fn spawn(spec: RunnerSpec) -> RunHandle {
@@ -516,6 +519,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                 &spec.model,
                 &messages,
                 &tool_definitions,
+                spec.reasoning_level.as_deref(),
             )
             .await?;
             futures::future::Either::Left(futures::future::Either::Left(s))
@@ -527,6 +531,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                 &spec.model,
                 &messages,
                 &tool_definitions,
+                spec.reasoning_level.as_deref(),
             )
             .await?;
             futures::future::Either::Left(futures::future::Either::Right(s))
@@ -538,6 +543,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                 &spec.model,
                 &messages,
                 &tool_definitions,
+                spec.reasoning_level.as_deref(),
             )
             .await?;
             futures::future::Either::Right(s)

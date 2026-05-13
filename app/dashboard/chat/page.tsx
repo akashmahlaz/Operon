@@ -240,13 +240,15 @@ function ChatPage() {
     };
   }, []);
 
-  /** Returns true only for providers/models that actually support thinking/reasoning cost control */
+  /** Returns true for providers/models that emit reasoning (either natively or via reasoning_effort) */
   function modelSupportsReasoning(spec: string): boolean {
     if (!spec.includes("/")) return false;
     const slashIdx = spec.indexOf("/");
     const providerId = spec.slice(0, slashIdx);
     const modelId = spec.slice(slashIdx + 1).toLowerCase();
-    if (providerId === "openai") return /^o\d/.test(modelId); // o1, o3, o4, o1-mini, o3-mini, o4-mini
+    if (providerId === "openai") {
+      return /^o\d/.test(modelId) || modelId.startsWith("gpt-5");
+    }
     if (providerId === "anthropic") {
       return (
         modelId.includes("3-7") ||
@@ -259,6 +261,10 @@ function ChatPage() {
     if (providerId === "google") {
       return modelId.startsWith("gemini-2.5") || modelId.startsWith("gemini-3");
     }
+    // Models that emit reasoning natively (reasoning_content / <think>)
+    if (providerId === "deepseek" || providerId === "groq") return true;
+    if (modelId.includes("r1") || modelId.includes("reasoner") || modelId.includes("thinking")) return true;
+    if (providerId === "minimax" || providerId === "qwen" || providerId === "alibaba") return true;
     return false;
   }
 

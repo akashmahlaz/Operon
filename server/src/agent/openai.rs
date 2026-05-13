@@ -149,6 +149,21 @@ impl ThinkSplitter {
     }
 }
 
+/// Map UI-level reasoning hint ("none"|"auto"|"low"|"medium"|"high") to
+/// OpenAI's `reasoning_effort` value. Returns `None` to omit the field
+/// (so non-reasoning models aren't broken by an unexpected key).
+fn openai_reasoning_effort(level: Option<&str>) -> Option<&'static str> {
+    match level.map(str::to_ascii_lowercase).as_deref() {
+        Some("low") => Some("low"),
+        Some("medium") => Some("medium"),
+        Some("high") => Some("high"),
+        // "auto" lets us send `medium` so the model actually emits reasoning;
+        // OpenAI defaults to `medium` already, but being explicit guarantees it.
+        Some("auto") => Some("medium"),
+        _ => None,
+    }
+}
+
 pub async fn stream_chat(
     client: &Client,
     api_key: &str,
@@ -156,6 +171,7 @@ pub async fn stream_chat(
     model: &str,
     messages: &[ChatMessage],
     tools: &[Value],
+    reasoning_level: Option<&str>,
 ) -> Result<impl Stream<Item = Result<OpenAiEvent>> + use<>> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
@@ -170,6 +186,9 @@ pub async fn stream_chat(
     if !tools.is_empty() {
         body["tools"] = serde_json::json!(tools);
         body["tool_choice"] = serde_json::json!("auto");
+    }
+    if let Some(effort) = openai_reasoning_effort(reasoning_level) {
+        body["reasoning_effort"] = serde_json::json!(effort);
     }
 
     let (response, retries) =
@@ -195,6 +214,7 @@ pub async fn stream_responses(
     model: &str,
     messages: &[ChatMessage],
     tools: &[Value],
+    reasoning_level: Option<&str>,
 ) -> Result<impl Stream<Item = Result<OpenAiEvent>> + use<>> {
     let url = format!("{}/responses", base_url.trim_end_matches('/'));
     let (instructions, input) = to_responses_input(messages);
@@ -212,6 +232,16 @@ pub async fn stream_responses(
         body["tools"] = serde_json::json!(response_tools);
         body["tool_choice"] = serde_json::json!("auto");
         body["parallel_tool_calls"] = serde_json::json!(true);
+    }
+    if let Some(effort) = openai_reasoning_effort(reasoning_level) {
+        // `summary: "auto"` is REQUIRED to receive
+        // `response.reasoning_summary_text.delta` SSE events.
+        // Without it, gpt-5/o-series do reasoning silently and emit no delta.
+        body["reasoning"] = serde_json::json!({ "effort": effort, "summary": "auto" });
+    } else {
+        // Even when no explicit effort is set, request reasoning summaries so
+        // gpt-5 / o-series surface their thinking instead of staying silent.
+        body["reasoning"] = serde_json::json!({ "summary": "auto" });
     }
 
     let (response, retries) =

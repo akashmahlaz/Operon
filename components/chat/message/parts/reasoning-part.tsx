@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ReasoningPartProps {
@@ -9,48 +10,58 @@ interface ReasoningPartProps {
   className?: string;
 }
 
-/** Copilot-style inline reasoning: live prose with a left bar while streaming. */
 export function ReasoningPart({ text, streaming, className }: ReasoningPartProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef<number>(0);
+
+  // Auto-open while streaming; user can manually toggle after
+  const effectiveOpen = open || !!streaming;
 
   useEffect(() => {
     if (!streaming) return;
     startRef.current = Date.now();
-    const id = setInterval(
-      () => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)),
-      500,
-    );
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 500);
     return () => clearInterval(id);
   }, [streaming]);
 
   if (!text && !streaming) return null;
 
+  const header = streaming
+    ? `Thinking${elapsed > 0 ? ` ${elapsed}s` : ""}\u2026`
+    : `Thought${elapsed > 0 ? ` for ${elapsed}s` : ""}`;
+
   return (
     <div className={cn("text-muted-foreground", className)}>
-      {open && (
-        <div className="border-l-2 border-muted-foreground/35 pl-3 dark:border-border/75">
-          <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/85">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="group/reasoning inline-flex items-center gap-1.5 text-[12px] italic leading-none text-muted-foreground/80 hover:text-muted-foreground"
+      >
+        {streaming ? (
+          <span
+            aria-hidden
+            className="inline-block size-1.5 rounded-full bg-primary/70 animate-pulse"
+          />
+        ) : (
+          <span className="text-primary/70">*</span>
+        )}
+        <span>{header}</span>
+        <ChevronRight className={cn("size-3 transition-transform", effectiveOpen && "rotate-90")} />
+      </button>
+
+      <div className={cn(
+        "overflow-hidden transition-[max-height,opacity] duration-200 ease-out",
+        effectiveOpen ? "max-h-96" : "max-h-0",
+      )}>
+        <div className="mt-2 border-l border-border/70 pl-3">
+          <p className="whitespace-pre-wrap text-[12px] italic leading-relaxed text-muted-foreground/75">
             {text}
             {streaming && (
-              <span className="ml-0.5 inline-block h-3 w-0.5 translate-y-0.5 rounded-sm bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
+              <span className="ml-0.5 inline-block w-px h-3 bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
             )}
           </p>
         </div>
-      )}
-
-      {!streaming && elapsed > 0 && (
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
-        >
-          <span>{open ? "Thought" : "Show thinking"}</span>
-          <span>-</span>
-          <span>{elapsed}s</span>
-        </button>
-      )}
+      </div>
     </div>
   );
 }

@@ -91,12 +91,24 @@ fn to_anthropic_tools(tools: &[Value]) -> Value {
     json!(converted)
 }
 
+/// Map UI-level reasoning hint to Anthropic `thinking.budget_tokens`.
+/// Returns `None` to omit the field on non-thinking models.
+fn anthropic_thinking_budget(level: Option<&str>) -> Option<u32> {
+    match level.map(str::to_ascii_lowercase).as_deref() {
+        Some("low") => Some(1024),
+        Some("medium") | Some("auto") => Some(4096),
+        Some("high") => Some(16384),
+        _ => None,
+    }
+}
+
 pub async fn stream_chat(
     client: &Client,
     api_key: &str,
     model: &str,
     messages: &[ChatMessage],
     tools: &[Value],
+    reasoning_level: Option<&str>,
 ) -> Result<impl Stream<Item = Result<OpenAiEvent>> + use<>> {
     let system_text = messages
         .iter()
@@ -114,6 +126,9 @@ pub async fn stream_chat(
     if !tools.is_empty() {
         body["tools"] = to_anthropic_tools(tools);
         body["tool_choice"] = json!({ "type": "auto" });
+    }
+    if let Some(budget) = anthropic_thinking_budget(reasoning_level) {
+        body["thinking"] = json!({ "type": "enabled", "budget_tokens": budget });
     }
 
     let (response, retries) = send_anthropic_stream_request(client, api_key, &body).await?;

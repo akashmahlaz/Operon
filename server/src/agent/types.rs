@@ -33,6 +33,11 @@ pub struct RunRequest {
     /// Optional provider/tool metadata stored with the run.
     #[serde(default)]
     pub metadata: Option<Value>,
+    /// Reasoning effort hint forwarded to the provider. One of
+    /// "none" | "auto" | "low" | "medium" | "high".
+    /// Maps to OpenAI `reasoning_effort` and Anthropic `thinking.budget_tokens`.
+    #[serde(default, alias = "reasoningLevel")]
+    pub reasoning_level: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
