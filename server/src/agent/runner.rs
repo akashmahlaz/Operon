@@ -145,6 +145,7 @@ fn canonical_tool_call(tool_call: &ToolCall) -> ToolCall {
 
 const BROADCAST_CAPACITY: usize = 1024;
 const DEFAULT_MAX_STEPS: usize = 200;
+const DEFAULT_SUBAGENT_MAX_STEPS: usize = 40;
 const OPENAI_MAX_TOOLS: usize = 128;
 const DEFAULT_INITIAL_NEXT_TOOLS: usize = 8;
 
@@ -1227,6 +1228,16 @@ pub fn default_max_steps() -> usize {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_MAX_STEPS)
+}
+
+/// Tighter step budget for subagent runs (runs created with a `parent_run_id`).
+/// Override via `OPERON_SUBAGENT_MAX_STEPS`; defaults to 40 so a single child
+/// can't burn through the parent's quota or loop indefinitely.
+pub fn default_subagent_max_steps() -> usize {
+    std::env::var("OPERON_SUBAGENT_MAX_STEPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_SUBAGENT_MAX_STEPS)
 }
 
 pub async fn load_events_since(

@@ -209,7 +209,14 @@ pub async fn create_run(
         github_token,
         initial_user_message: prompt.to_owned(),
         db: state.db.clone(),
-        max_steps: runner::default_max_steps(),
+        // Child runs (spawned via subagent tool) get an isolated, tighter
+        // step budget so a runaway subagent can't exhaust the parent
+        // agent's quota or loop indefinitely.
+        max_steps: if payload.parent_run_id.is_some() {
+            runner::default_subagent_max_steps()
+        } else {
+            runner::default_max_steps()
+        },
         channel: channel.to_owned(),
         next_base_url: state.config.next_base_url.clone(),
         next_service_token,
