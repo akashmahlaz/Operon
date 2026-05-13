@@ -1495,6 +1495,8 @@ function ConversationStatusBar({
   error?: Error | null;
 }) {
   const [busy, setBusy] = useState(false);
+  const [compactStatus, setCompactStatus] = useState<string | null>(null);
+  const [compactPreview, setCompactPreview] = useState<string>("");
 
   // Find the most recent usage event across all messages.
   const usage = (() => {
@@ -1529,17 +1531,69 @@ function ConversationStatusBar({
   async function compact() {
     if (!conversationId) return;
     setBusy(true);
+    setCompactStatus("Starting…");
+    setCompactPreview("");
     try {
       const res = await operonFetch(`/agent/conversations/${conversationId}/compact`, {
         method: "POST",
+        headers: { Accept: "text/event-stream" },
       });
-      if (!res.ok) throw new Error(`compact failed (${res.status})`);
-      toast.success("Conversation compacted");
+      if (!res.ok || !res.body) throw new Error(`compact failed (${res.status})`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let preview = "";
+      let usedLlm = false;
+      let compacted = 0;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // SSE frames are separated by blank lines.
+        const frames = buf.split("\n\n");
+        buf = frames.pop() ?? "";
+        for (const frame of frames) {
+          const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+          if (!dataLine) continue;
+          const payload = dataLine.slice(5).trim();
+          if (!payload) continue;
+          try {
+            const ev = JSON.parse(payload) as { type?: string; data?: Record<string, unknown> };
+            if (ev.type === "progress" && typeof ev.data?.text === "string") {
+              setCompactStatus(ev.data.text);
+            } else if (ev.type === "text-delta" && typeof ev.data?.text === "string") {
+              preview += ev.data.text;
+              setCompactPreview(preview.slice(-200));
+            } else if (ev.type === "done") {
+              usedLlm = Boolean(ev.data?.usedLlm);
+              compacted = Number(ev.data?.compacted ?? 0);
+            } else if (ev.type === "stream-error") {
+              throw new Error(String(ev.data?.message ?? "compact failed"));
+            }
+          } catch (parseErr) {
+            // Surface JSON parse errors as toast — but keep going if it's a non-event line.
+            if (parseErr instanceof SyntaxError) continue;
+            throw parseErr;
+          }
+        }
+      }
+
+      if (compacted === 0) {
+        toast.message("Nothing to compact yet");
+      } else {
+        toast.success(
+          `Compacted ${compacted} message${compacted === 1 ? "" : "s"}${usedLlm ? " (LLM summary)" : ""}`,
+        );
+      }
       onCompacted?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Compact failed");
     } finally {
       setBusy(false);
+      setCompactStatus(null);
+      setCompactPreview("");
     }
   }
 
@@ -1562,6 +1616,17 @@ function ConversationStatusBar({
         {error && (
           <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">
             run interrupted
+          </span>
+        )}
+        {busy && compactStatus && (
+          <span className="flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+            <Loader2 className="size-2.5 animate-spin" />
+            {compactStatus}
+            {compactPreview && (
+              <span className="ml-1 max-w-[180px] truncate font-mono text-[9px] opacity-70">
+                …{compactPreview}
+              </span>
+            )}
           </span>
         )}
       </div>

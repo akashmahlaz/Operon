@@ -225,7 +225,7 @@ pub async fn create_run(
     }))
 }
 
-fn provider_base_url(provider: &str) -> &'static str {
+pub(crate) fn provider_base_url(provider: &str) -> &'static str {
     match provider {
         "openrouter" => "https://openrouter.ai/api/v1",
         "groq" => "https://api.groq.com/openai/v1",

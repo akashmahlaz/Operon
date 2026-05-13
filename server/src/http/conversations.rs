@@ -7,11 +7,16 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::HeaderMap,
+    response::sse::{Event, KeepAlive, Sse},
 };
 use chrono::{DateTime, Utc};
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::convert::Infallible;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::{
@@ -320,16 +325,21 @@ pub async fn append_message(
 // ─────────────────────────────────────────────────────────────────────────
 
 /// POST /agent/conversations/:id/compact
-/// Replaces all but the most recent 8 messages with a single synthetic
-/// system message that summarises the earlier turns. NOTE: this currently
-/// produces a structural compaction (a "summary placeholder" listing
-/// participant counts) without invoking the LLM; future work will pipe
-/// the truncated messages through a summarisation prompt.
+///
+/// Streams the compaction process as Server-Sent Events so the UI can render
+/// live progress (loading → summarising → saving → done) instead of blocking
+/// on a single REST response. If the user has a configured provider profile
+/// for the conversation's last-used model, an LLM-generated summary is
+/// streamed token-by-token; otherwise we fall back to a structural heuristic
+/// summary (still streamed in chunks for visual continuity).
+///
+/// Frame shape: `{"type": "...", "data": {...}}` — same envelope as the run
+/// SSE stream so the frontend can reuse the same parser.
 pub async fn compact_conversation(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     headers: HeaderMap,
-) -> AppResult<Json<Value>> {
+) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let user_id = require_user(&state, &headers)?;
 
     let owner = sqlx::query("select user_id from conversations where id = $1")
@@ -342,88 +352,323 @@ pub async fn compact_conversation(
         return Err(AppError::Unauthorized);
     }
 
-    // Load all message ids in order.
-    let rows = sqlx::query(
+    let (tx, rx) = mpsc::channel::<Value>(64);
+    tokio::spawn(run_compaction(state.clone(), id, user_id, tx));
+
+    let stream = ReceiverStream::new(rx).map(|payload| {
+        Ok::<Event, Infallible>(
+            Event::default()
+                .event("message")
+                .data(payload.to_string()),
+        )
+    });
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+fn compact_event(kind: &str, data: Value) -> Value {
+    json!({ "type": kind, "data": data })
+}
+
+async fn run_compaction(
+    state: AppState,
+    conversation_id: Uuid,
+    user_id: Uuid,
+    tx: mpsc::Sender<Value>,
+) {
+    use crate::agent::openai::{self, ChatMessage};
+
+    let send = |evt: Value| {
+        let tx = tx.clone();
+        async move {
+            let _ = tx.send(evt).await;
+        }
+    };
+
+    send(compact_event(
+        "progress",
+        json!({ "status": "active", "text": "Loading conversation history" }),
+    ))
+    .await;
+
+    let rows = match sqlx::query(
         "select id, role, content from messages where conversation_id = $1 order by created_at asc",
     )
-    .bind(id)
+    .bind(conversation_id)
     .fetch_all(&state.db)
-    .await?;
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            send(compact_event(
+                "stream-error",
+                json!({ "message": format!("load messages: {e}") }),
+            ))
+            .await;
+            return;
+        }
+    };
 
     if rows.len() <= 8 {
-        return Ok(Json(json!({ "ok": true, "compacted": 0 })));
+        send(compact_event(
+            "done",
+            json!({ "ok": true, "compacted": 0, "reason": "nothing to compact" }),
+        ))
+        .await;
+        return;
     }
 
-    // Keep the last 8 messages; everything before them gets summarised.
     let cutoff = rows.len() - 8;
-    let to_compact: Vec<_> = rows.iter().take(cutoff).collect();
-    let user_count = to_compact
-        .iter()
-        .filter(|r| {
-            r.try_get::<String, _>("role")
-                .map(|s| s == "user")
-                .unwrap_or(false)
-        })
-        .count();
-    let asst_count = to_compact
-        .iter()
-        .filter(|r| {
-            r.try_get::<String, _>("role")
-                .map(|s| s == "assistant")
-                .unwrap_or(false)
-        })
-        .count();
+    let to_compact: Vec<&sqlx::postgres::PgRow> = rows.iter().take(cutoff).collect();
 
-    // Build a brief text summary from the leading user prompts.
-    let mut snippets: Vec<String> = Vec::new();
-    for r in to_compact.iter().take(6) {
-        let role: String = r.try_get("role")?;
-        let content: String = r.try_get("content")?;
-        if role == "user" {
-            let s: String = content.chars().take(120).collect();
-            snippets.push(format!("- {s}"));
+    send(compact_event(
+        "progress",
+        json!({
+            "status": "active",
+            "text": format!("Summarising {cutoff} earlier message(s)"),
+        }),
+    ))
+    .await;
+
+    // Try LLM-driven summary first (best-effort). Fallback: structural heuristic.
+    let mut summary = String::new();
+    let mut used_llm = false;
+
+    if let Some((provider, model, api_key)) =
+        resolve_summarisation_provider(&state, conversation_id, user_id).await
+    {
+        let base_url = crate::http::agent::provider_base_url(&provider).to_owned();
+        let prompt = build_summarisation_prompt(&to_compact);
+        let messages = vec![
+            ChatMessage {
+                role: "system".into(),
+                content: Some(
+                    "You compress chat history. Produce a concise (≤200 word) bullet \
+                     summary capturing user goals, decisions made, key facts, and any \
+                     unresolved questions. Use plain text bullets, no preamble."
+                        .into(),
+                ),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: Some(prompt),
+                name: None,
+                tool_call_id: None,
+                tool_calls: None,
+            },
+        ];
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .unwrap_or_default();
+
+        // Only the openai-compat chat completions path is supported here; the
+        // Responses API path requires more plumbing and isn't worth it for a
+        // best-effort summariser. Provider-specific routing can be added later.
+        let stream_res =
+            openai::stream_chat(&client, &api_key, &base_url, &model, &messages, &[], None).await;
+
+        match stream_res {
+            Ok(stream) => {
+                tokio::pin!(stream);
+                while let Some(item) = stream.next().await {
+                    match item {
+                        Ok(openai::OpenAiEvent::TextDelta(t)) => {
+                            summary.push_str(&t);
+                            send(compact_event("text-delta", json!({ "text": t }))).await;
+                        }
+                        Ok(openai::OpenAiEvent::Finished { .. }) => break,
+                        Ok(_) => {}
+                        Err(e) => {
+                            send(compact_event(
+                                "progress",
+                                json!({
+                                    "status": "active",
+                                    "text": format!("LLM summary failed ({e}); using fallback"),
+                                }),
+                            ))
+                            .await;
+                            summary.clear();
+                            break;
+                        }
+                    }
+                }
+                if !summary.trim().is_empty() {
+                    used_llm = true;
+                }
+            }
+            Err(e) => {
+                send(compact_event(
+                    "progress",
+                    json!({
+                        "status": "active",
+                        "text": format!("LLM unreachable ({e}); using fallback"),
+                    }),
+                ))
+                .await;
+            }
         }
     }
-    let summary = format!(
-        "Earlier in this conversation: {user_count} user message(s) and {asst_count} assistant response(s). \
-         Highlights:\n{}",
-        snippets.join("\n")
-    );
 
-    // Delete the old messages, insert the summary as a synthetic system message
-    // with timestamp matching the first compacted message so order is preserved.
-    let mut tx = state.db.begin().await?;
-    for r in &to_compact {
-        let mid: Uuid = r.try_get("id")?;
-        sqlx::query("delete from messages where id = $1")
-            .bind(mid)
-            .execute(&mut *tx)
-            .await?;
+    if !used_llm {
+        summary = heuristic_summary(&to_compact);
+        // Stream the heuristic summary in chunks too, so the UI animates.
+        for chunk in summary.split_inclusive('\n') {
+            send(compact_event("text-delta", json!({ "text": chunk }))).await;
+        }
     }
+
+    send(compact_event("text-end", json!({}))).await;
+    send(compact_event(
+        "progress",
+        json!({ "status": "active", "text": "Saving summary" }),
+    ))
+    .await;
+
     let summary_parts = json!([
         { "type": "progress", "text": "Compacted earlier conversation", "status": "complete" },
         { "type": "text-delta", "text": summary.clone() },
         { "type": "text-end", "text": "" }
     ]);
-    sqlx::query(
-        "insert into messages (id, conversation_id, user_id, role, content, parts) \
-         values ($1, $2, $3, 'system', $4, $5)",
-    )
-    .bind(Uuid::now_v7())
-    .bind(id)
-    .bind(user_id)
-    .bind(&summary)
-    .bind(summary_parts)
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
 
-    sqlx::query("update conversations set updated_at = now() where id = $1")
-        .bind(id)
-        .execute(&state.db)
+    let persist = async {
+        let mut tx = state.db.begin().await?;
+        for r in &to_compact {
+            let mid: Uuid = r.try_get("id")?;
+            sqlx::query("delete from messages where id = $1")
+                .bind(mid)
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::query(
+            "insert into messages (id, conversation_id, user_id, role, content, parts) \
+             values ($1, $2, $3, 'system', $4, $5)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(conversation_id)
+        .bind(user_id)
+        .bind(&summary)
+        .bind(&summary_parts)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
+        sqlx::query("update conversations set updated_at = now() where id = $1")
+            .bind(conversation_id)
+            .execute(&state.db)
+            .await?;
+        Ok::<(), sqlx::Error>(())
+    };
 
-    Ok(Json(json!({ "ok": true, "compacted": cutoff })))
+    if let Err(e) = persist.await {
+        send(compact_event(
+            "stream-error",
+            json!({ "message": format!("persist summary: {e}") }),
+        ))
+        .await;
+        return;
+    }
+
+    send(compact_event(
+        "done",
+        json!({
+            "ok": true,
+            "compacted": cutoff,
+            "usedLlm": used_llm,
+        }),
+    ))
+    .await;
+}
+
+/// Look up the most recent run's model on this conversation and resolve the
+/// provider's API key from `provider_profiles`. Returns
+/// `Some((provider, model, api_key))` on success, `None` otherwise.
+async fn resolve_summarisation_provider(
+    state: &AppState,
+    conversation_id: Uuid,
+    user_id: Uuid,
+) -> Option<(String, String, String)> {
+    let row = sqlx::query(
+        "select model from runs where conversation_id = $1 and model is not null \
+         order by created_at desc limit 1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()?;
+    let model_full: String = row.try_get("model").ok()?;
+    let (provider, model_id) = if let Some(slash) = model_full.find('/') {
+        (
+            model_full[..slash].to_owned(),
+            model_full[slash + 1..].to_owned(),
+        )
+    } else {
+        ("openai".to_owned(), model_full)
+    };
+    // Skip Responses-API-only models (gpt-5, codex) — see comment above.
+    if crate::agent::openai::requires_responses_api(&model_id) {
+        return None;
+    }
+    if provider == "anthropic" {
+        return None;
+    }
+
+    let key_row = sqlx::query(
+        "select api_key_ciphertext from provider_profiles where user_id = $1 and provider = $2",
+    )
+    .bind(user_id)
+    .bind(&provider)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    let api_key = key_row
+        .and_then(|r| r.try_get::<Option<String>, _>("api_key_ciphertext").ok().flatten())
+        .filter(|k| !k.is_empty())
+        .or_else(|| state.config.openai_api_key.clone())?;
+
+    Some((provider, model_id, api_key))
+}
+
+fn build_summarisation_prompt(rows: &[&sqlx::postgres::PgRow]) -> String {
+    let mut buf = String::with_capacity(8 * 1024);
+    buf.push_str("Summarise this chat history:\n\n");
+    for r in rows {
+        let role: String = r.try_get("role").unwrap_or_default();
+        let content: String = r.try_get("content").unwrap_or_default();
+        let snippet: String = content.chars().take(800).collect();
+        buf.push_str(&format!("[{role}] {snippet}\n\n"));
+    }
+    buf
+}
+
+fn heuristic_summary(rows: &[&sqlx::postgres::PgRow]) -> String {
+    let user_count = rows
+        .iter()
+        .filter(|r| r.try_get::<String, _>("role").map(|s| s == "user").unwrap_or(false))
+        .count();
+    let asst_count = rows
+        .iter()
+        .filter(|r| r.try_get::<String, _>("role").map(|s| s == "assistant").unwrap_or(false))
+        .count();
+    let mut snippets: Vec<String> = Vec::new();
+    for r in rows.iter().take(6) {
+        let role: String = r.try_get("role").unwrap_or_default();
+        let content: String = r.try_get("content").unwrap_or_default();
+        if role == "user" {
+            let s: String = content.chars().take(120).collect();
+            snippets.push(format!("- {s}"));
+        }
+    }
+    format!(
+        "Earlier in this conversation: {user_count} user message(s) and {asst_count} assistant response(s).\nHighlights:\n{}",
+        snippets.join("\n")
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────
