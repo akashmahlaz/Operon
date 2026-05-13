@@ -42,6 +42,14 @@ yarn-error.log*
 next-env.d.ts
 pnpm-lock.yaml
 /operonx/target/
+
+# Rust server build + sqlx + nested git
+server/.git/
+server/target/
+server/.sqlx/
+server/**/*.log
+
+# Other workspaces
 brilion
 openclaw
 hermes-agent
@@ -49,4 +57,3 @@ Docs
 chat-sdk-docs 
 justbecuase
 vscode-copilot-chat
-server

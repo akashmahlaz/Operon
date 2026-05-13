@@ -2,6 +2,34 @@
 
 > Auto-loaded by GitHub Copilot for every chat in this workspace. Future AI agents MUST follow these rules.
 
+## Active product plan (locked 2026-05-13 — DO NOT REORDER without asking the user)
+
+**Priority 1 — UI/UX repair to pre-2026-05-12 quality (in progress).** The chat UI from commits older than yesterday was the user-approved baseline. Reference commits: `f9ce32f` (2026-05-11), `4f11565` (2026-05-07). When fixing message UI, ALWAYS diff against these commits first — do not invent styles. Specifically: drop the noisy progress chain ("Evaluating request / Sending request to model / Received model response") emitted from `server/src/agent/runner.rs`, keep only one "Working…" indicator, move usage out of the message body into the status bar, keep the centered greeting + chip empty state and the right-aligned bubble `UserMessage`.
+
+**Priority 2 — Continue Rust backend.** Lots of work invested, fast, working. Finish remaining ~3% Copilot parity (live compaction stream, child-run streaming, isolated subagent budgets, provider request id, inline error cards). Investigate adopting an existing Rust agent SDK (e.g. `rig`, `swiftide`) for agents/subagents instead of hand-rolled before any major refactor.
+
+**Priority 3 — `ads-manager` branch.** Separate sub-product for SEO + Meta Ads + Google Ads ONLY. New landing page with images + heavy social proof, "intentional vibe-coded" look. Goal: SEO + ads revenue. Shares auth/billing/MongoDB with main; different sidebar, agent prompt, integrations, domain. Do NOT pollute `main` with ads-only code.
+
+**Priority 4 — `main` branch keeps growing as unified Operon AI.** Chat, Google, Social, Trading, Coding today; future code editor, trading agent, desktop app.
+
+**Future experiments (NOT now, only when explicitly approved).** Vercel AI SDK v6 `ToolLoopAgent` + native subagents + Workflow SDK (`'use workflow'`/`'use step'` durable steps with managed persistence + observability) + AI Gateway + Vercel Agent — would replace hand-rolled tool loop, durable runs, provider routing. Spike branch only when greenlit. Express alternative considered.
+
+## Branch awareness
+
+- ALWAYS run `git branch --show-current` before non-trivial edits.
+- `main` → unified Operon AI, all features.
+- `ads-manager` → ads-only sub-product.
+- `spike/*` → throwaway experiments.
+
+## Brand
+
+Name not finalized. Candidates: keep "Operon" or family pattern like Eaztack → Eazcode/Eazads. Treat the brand string as a single config constant for easy swap. Desktop app is planned — name must scale.
+
+## Git hygiene
+
+- `server/` IS tracked in the parent repo (no nested `.git`). Root `.gitignore` MUST exclude: `server/.git/`, `server/target/`, `server/.sqlx/`, `**/node_modules/`, `**/.next/`, `*.log`, local `.env*`.
+- If `git status` shows >1000 files, an ignore pattern regressed.
+
 ## Stack
 
 - **Next.js 16.2.4** (Turbopack) App Router, **React 19.2.4**. This is NOT the Next.js you know — read `node_modules/next/dist/docs/` before introducing new APIs.
