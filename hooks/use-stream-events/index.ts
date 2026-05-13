@@ -18,6 +18,8 @@ import type {
   SubagentEvent,
   WarningEvent,
   UsageEvent,
+  ProviderRequestIdEvent,
+  StreamErrorEvent,
 } from "./types";
 import { operonFetch } from "@/lib/operon-api";
 
@@ -53,6 +55,9 @@ type SSEEventType =
   | "subagent-progress"
   | "subagent-result"
   | "warning"
+  | "usage"
+  | "provider-request-id"
+  | "stream-error"
   | "usage"
   | "message-end"
   | "done"
@@ -96,6 +101,9 @@ interface SSEEvent {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    provider?: string | null;
+    model?: string;
+    requestId?: string | null;
   };
 }
 
@@ -532,6 +540,26 @@ export function useStreamEvents({
           completionTokens: ev.data.completionTokens ?? 0,
           totalTokens: ev.data.totalTokens ?? 0,
         } satisfies UsageEvent);
+        break;
+
+      case "provider-request-id":
+        appendPart({
+          id: nextId(),
+          type: "provider-request-id",
+          provider: ev.data.provider ?? "",
+          model: ev.data.model ?? "",
+          requestId: ev.data.requestId ?? "",
+        } satisfies ProviderRequestIdEvent);
+        break;
+
+      case "stream-error":
+        appendPart({
+          id: nextId(),
+          type: "stream-error",
+          message: ev.data.message ?? "Stream error",
+          requestId: ev.data.requestId ?? null,
+          provider: ev.data.provider ?? null,
+        } satisfies StreamErrorEvent);
         break;
 
       case "error": {

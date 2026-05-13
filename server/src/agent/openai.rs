@@ -74,6 +74,9 @@ pub enum OpenAiEvent {
         delay_ms: u64,
         message: String,
     },
+    /// Provider-side request id captured from response headers (e.g. OpenAI
+    /// `x-request-id`, Anthropic `request-id`). Useful for log correlation.
+    ProviderRequestId(String),
     /// Stream finished. The accumulated tool calls (if any) are returned so
     /// the runner can dispatch and loop.
     Finished {
@@ -194,17 +197,23 @@ pub async fn stream_chat(
     let (response, retries) =
         send_openai_stream_request(client, api_key, &url, &body, "openai").await?;
 
+    let request_id = extract_request_id(response.headers());
     let byte_stream = response.bytes_stream();
 
-    Ok(futures::stream::iter(retries.into_iter().map(|retry| {
-        Ok(OpenAiEvent::ProviderRetry {
-            attempt: retry.attempt,
-            max_attempts: retry.max_attempts,
-            delay_ms: retry.delay_ms,
-            message: retry.message,
+    let prefix: Vec<Result<OpenAiEvent>> = retries
+        .into_iter()
+        .map(|retry| {
+            Ok(OpenAiEvent::ProviderRetry {
+                attempt: retry.attempt,
+                max_attempts: retry.max_attempts,
+                delay_ms: retry.delay_ms,
+                message: retry.message,
+            })
         })
-    }))
-    .chain(parse_sse(byte_stream)))
+        .chain(request_id.map(|id| Ok(OpenAiEvent::ProviderRequestId(id))))
+        .collect();
+
+    Ok(futures::stream::iter(prefix).chain(parse_sse(byte_stream)))
 }
 
 pub async fn stream_responses(
@@ -247,15 +256,33 @@ pub async fn stream_responses(
     let (response, retries) =
         send_openai_stream_request(client, api_key, &url, &body, "openai responses").await?;
 
-    Ok(futures::stream::iter(retries.into_iter().map(|retry| {
-        Ok(OpenAiEvent::ProviderRetry {
-            attempt: retry.attempt,
-            max_attempts: retry.max_attempts,
-            delay_ms: retry.delay_ms,
-            message: retry.message,
+    let request_id = extract_request_id(response.headers());
+    let byte_stream = response.bytes_stream();
+
+    let prefix: Vec<Result<OpenAiEvent>> = retries
+        .into_iter()
+        .map(|retry| {
+            Ok(OpenAiEvent::ProviderRetry {
+                attempt: retry.attempt,
+                max_attempts: retry.max_attempts,
+                delay_ms: retry.delay_ms,
+                message: retry.message,
+            })
         })
-    }))
-    .chain(parse_responses_sse(response.bytes_stream())))
+        .chain(request_id.map(|id| Ok(OpenAiEvent::ProviderRequestId(id))))
+        .collect();
+
+    Ok(futures::stream::iter(prefix).chain(parse_responses_sse(byte_stream)))
+}
+
+/// Extract the provider-assigned request id from response headers.
+/// OpenAI uses `x-request-id`; Anthropic uses `request-id`. We try both.
+fn extract_request_id(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get("x-request-id")
+        .or_else(|| headers.get("request-id"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
 }
 
 async fn send_openai_stream_request(

@@ -218,6 +218,32 @@ pub fn message_end() -> Value {
     json!({ "type": "message-end", "data": {} })
 }
 
+/// Provider-side request id (for log correlation). Emitted once per LLM
+/// request, before streaming text begins.
+pub fn provider_request_id(provider: &str, model: &str, request_id: &str) -> Value {
+    json!({
+        "type": "provider-request-id",
+        "data": {
+            "provider": provider,
+            "model": model,
+            "requestId": request_id,
+        }
+    })
+}
+
+/// Stream-level error (HTTP failure mid-stream, parser failure, etc.).
+/// Renders as an inline error card on the frontend without aborting the run.
+pub fn stream_error(message: &str, request_id: Option<&str>, provider: Option<&str>) -> Value {
+    json!({
+        "type": "stream-error",
+        "data": {
+            "message": message,
+            "requestId": request_id,
+            "provider": provider,
+        }
+    })
+}
+
 /// Token usage emitted on completion. Mirrors `usage`.
 pub fn usage(prompt_tokens: u64, completion_tokens: u64, total_tokens: u64) -> Value {
     json!({

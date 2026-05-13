@@ -23,6 +23,7 @@ import type {
   SubagentEvent,
   WarningEvent,
   UsageEvent,
+  StreamErrorEvent,
 } from "@/hooks/use-stream-events/types";
 import {
   AlertCircle,
@@ -367,6 +368,27 @@ function WarningBanner({ ev }: { ev: WarningEvent }) {
     <div className="my-1 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
       <span>{ev.text}</span>
+    </div>
+  );
+}
+
+function StreamErrorCard({ ev }: { ev: StreamErrorEvent }) {
+  return (
+    <div className="my-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-[12.5px] text-destructive">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">
+            {ev.provider ? `${ev.provider} stream error` : "Stream error"}
+          </p>
+          <p className="mt-0.5 break-words text-foreground/80">{ev.message}</p>
+          {ev.requestId && (
+            <p className="mt-1 font-mono text-[10.5px] text-muted-foreground">
+              request-id: {ev.requestId}
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -800,7 +822,8 @@ type RenderSegment =
   | { kind: "confirmation"; ev: ConfirmationEvent }
   | { kind: "command-button"; ev: CommandButtonEvent }
   | { kind: "subagent"; events: SubagentEvent[] }
-  | { kind: "usage"; ev: UsageEvent };
+  | { kind: "usage"; ev: UsageEvent }
+  | { kind: "stream-error"; ev: StreamErrorEvent };
 
 type ThinkingRunSegment = Extract<RenderSegment, { kind: "reasoning" } | { kind: "tools" }>;
 type RenderGroup = RenderSegment | { kind: "thinking-run"; segments: ThinkingRunSegment[] };
@@ -957,7 +980,11 @@ function buildSegments(parts: StreamPart[]): RenderSegment[] {
       }
     } else if (part.type === "usage") {
       segs.push({ kind: "usage", ev: part as UsageEvent });
+    } else if (part.type === "stream-error") {
+      segs.push({ kind: "stream-error", ev: part as StreamErrorEvent });
     }
+    // "provider-request-id" is intentionally not rendered as a segment;
+    // it's surfaced by the assistant footer / dev tools.
   }
 
   return segs;
@@ -1139,6 +1166,9 @@ function StreamingAssistantMessage({
           if (seg.kind === "usage") {
             // Usage is shown in the bottom status bar — don't render in message body.
             return null;
+          }
+          if (seg.kind === "stream-error") {
+            return <StreamErrorCard key={i} ev={seg.ev} />;
           }
           return null;
         })}

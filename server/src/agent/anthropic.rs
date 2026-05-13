@@ -133,15 +133,28 @@ pub async fn stream_chat(
 
     let (response, retries) = send_anthropic_stream_request(client, api_key, &body).await?;
 
-    Ok(futures::stream::iter(retries.into_iter().map(|retry| {
-        Ok(OpenAiEvent::ProviderRetry {
-            attempt: retry.attempt,
-            max_attempts: retry.max_attempts,
-            delay_ms: retry.delay_ms,
-            message: retry.message,
+    let request_id = response
+        .headers()
+        .get("request-id")
+        .or_else(|| response.headers().get("x-request-id"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let byte_stream = response.bytes_stream();
+
+    let prefix: Vec<Result<OpenAiEvent>> = retries
+        .into_iter()
+        .map(|retry| {
+            Ok(OpenAiEvent::ProviderRetry {
+                attempt: retry.attempt,
+                max_attempts: retry.max_attempts,
+                delay_ms: retry.delay_ms,
+                message: retry.message,
+            })
         })
-    }))
-    .chain(parse_anthropic_sse(response.bytes_stream())))
+        .chain(request_id.map(|id| Ok(OpenAiEvent::ProviderRequestId(id))))
+        .collect();
+
+    Ok(futures::stream::iter(prefix).chain(parse_anthropic_sse(byte_stream)))
 }
 
 async fn send_anthropic_stream_request(

@@ -31,7 +31,9 @@ export type ContentPartType =
   | "subagent-progress"
   | "subagent-result"
   | "warning"
-  | "usage";
+  | "usage"
+  | "provider-request-id"
+  | "stream-error";
 
 export interface ReasoningPartEvent {
   id: string;
@@ -170,6 +172,24 @@ export interface UsageEvent {
   totalTokens: number;
 }
 
+/** Provider-side request id captured from response headers. */
+export interface ProviderRequestIdEvent {
+  id: string;
+  type: "provider-request-id";
+  provider: string;
+  model: string;
+  requestId: string;
+}
+
+/** Stream-level error rendered as an inline error card. */
+export interface StreamErrorEvent {
+  id: string;
+  type: "stream-error";
+  message: string;
+  requestId?: string | null;
+  provider?: string | null;
+}
+
 // A single ordered part in the stream
 export type StreamPart =
   | ReasoningPartEvent
@@ -185,7 +205,9 @@ export type StreamPart =
   | CommandButtonEvent
   | SubagentEvent
   | WarningEvent
-  | UsageEvent;
+  | UsageEvent
+  | ProviderRequestIdEvent
+  | StreamErrorEvent;
 
 // Full ordered list for a message being built
 export interface StreamingMessage {

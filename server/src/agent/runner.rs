@@ -559,12 +559,28 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         let mut finish_reason = String::new();
         let mut usage: Option<(u64, u64, u64)> = None;
         let mut provider_notices: Vec<Value> = Vec::new();
+        let mut provider_request_id: Option<String> = None;
+        let mut stream_failed: Option<String> = None;
 
         while let Some(event) = stream.next().await {
             if handle.cancel.is_cancelled() {
                 anyhow::bail!("run cancelled");
             }
-            let event = event?;
+            let event = match event {
+                Ok(ev) => ev,
+                Err(err) => {
+                    let msg = format!("{err:#}");
+                    handle
+                        .emit(&events::stream_error(
+                            &msg,
+                            provider_request_id.as_deref(),
+                            Some(spec.provider.as_str()),
+                        ))
+                        .await?;
+                    stream_failed = Some(msg);
+                    break;
+                }
+            };
             match event {
                 OpenAiEvent::ReasoningDelta(delta) => {
                     let id = match reasoning_id.as_ref() {
@@ -643,6 +659,16 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                     handle.emit(&events::warning(&text)).await?;
                     provider_notices.push(json!({ "type": "warning", "text": text }));
                 }
+                OpenAiEvent::ProviderRequestId(id) => {
+                    handle
+                        .emit(&events::provider_request_id(
+                            &spec.provider,
+                            &spec.model,
+                            &id,
+                        ))
+                        .await?;
+                    provider_request_id = Some(id);
+                }
                 OpenAiEvent::Finished {
                     finish_reason: r,
                     tool_calls,
@@ -658,6 +684,44 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         }
         if text_started {
             handle.emit(&events::text_end()).await?;
+        }
+
+        // If the underlying provider stream errored mid-flight, persist the
+        // partial assistant turn (so the user sees their inline error card on
+        // reload) and bail out cleanly with a typed error.
+        if let Some(err_msg) = stream_failed.clone() {
+            let mut assistant_parts: Vec<Value> = Vec::new();
+            assistant_parts.extend(provider_notices.clone());
+            if !accumulated_reasoning.is_empty() {
+                assistant_parts.push(json!({
+                    "type": "reasoning-delta",
+                    "text": accumulated_reasoning,
+                }));
+                assistant_parts.push(json!({ "type": "reasoning-end", "text": "" }));
+            }
+            if !accumulated_text.is_empty() {
+                assistant_parts.push(json!({ "type": "text-delta", "text": accumulated_text }));
+                assistant_parts.push(json!({ "type": "text-end", "text": "" }));
+            }
+            assistant_parts.push(json!({
+                "type": "stream-error",
+                "message": err_msg,
+                "requestId": provider_request_id,
+                "provider": spec.provider,
+            }));
+            persist_message(
+                &spec.db,
+                &spec.conversation_id,
+                Some(&spec.user_id),
+                "assistant",
+                &accumulated_text,
+                &assistant_parts,
+                Some(&spec.model),
+            )
+            .await?;
+            handle.emit(&events::message_end()).await?;
+            set_status(&spec.db, spec.run_id, RunStatus::Failed, Some(err_msg.clone())).await?;
+            anyhow::bail!(err_msg);
         }
 
         // Build UI parts for this assistant turn (reasoning + text + per-tool-call parts).
