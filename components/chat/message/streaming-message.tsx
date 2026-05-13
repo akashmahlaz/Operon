@@ -1137,7 +1137,8 @@ function StreamingAssistantMessage({
             return <SubagentCard key={i} events={seg.events} />;
           }
           if (seg.kind === "usage") {
-            return <UsageBadge key={i} ev={seg.ev} />;
+            // Usage is shown in the bottom status bar — don't render in message body.
+            return null;
           }
           return null;
         })}

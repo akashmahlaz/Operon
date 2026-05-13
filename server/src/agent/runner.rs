@@ -501,8 +501,6 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             anyhow::bail!("run cancelled");
         }
 
-        handle.emit(&events::progress("Evaluating request")).await?;
-
         let tool_definitions = provider_tool_definitions(
             &spec.provider,
             &spec.channel,
@@ -510,13 +508,6 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             &loaded_next_tool_names,
             &spec.initial_user_message,
         );
-        handle
-            .emit(&events::progress_done("Evaluated request"))
-            .await?;
-
-        handle
-            .emit(&events::progress("Sending request to model"))
-            .await?;
 
         let stream = if spec.provider == "anthropic" {
             let s = anthropic::stream_chat(
@@ -662,9 +653,6 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         if text_started {
             handle.emit(&events::text_end()).await?;
         }
-        handle
-            .emit(&events::progress_done("Received model response"))
-            .await?;
 
         // Build UI parts for this assistant turn (reasoning + text + per-tool-call parts).
         let mut assistant_parts: Vec<Value> = Vec::new();
