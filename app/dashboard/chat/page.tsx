@@ -1329,7 +1329,10 @@ function ChatPage() {
             <ConversationStatusBar
               messages={chatMessages as StreamingMessage[]}
               conversationId={conversationId}
-              onCompacted={() => loadConversations()}
+              onCompacted={() => {
+                loadConversations();
+                if (conversationId) void loadConversation(conversationId);
+              }}
               error={chatError}
             />
             <div className="relative flex flex-col rounded-2xl border border-border bg-card shadow-sm transition-all duration-200 focus-within:border-primary/30 focus-within:shadow-md">

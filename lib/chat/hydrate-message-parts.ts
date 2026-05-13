@@ -23,6 +23,7 @@ const STREAM_PART_TYPES = new Set<ContentPartType>([
   "confirmation",
   "command-button",
   "subagent-start",
+  "subagent-progress",
   "subagent-result",
   "warning",
   "usage",
@@ -145,13 +146,16 @@ export function hydrateMessageParts(
           args: raw.args,
         }];
       }
-      if (type === "subagent-start" || type === "subagent-result") {
+      if (type === "subagent-start" || type === "subagent-progress" || type === "subagent-result") {
+        const status = typeof raw.status === "string" ? raw.status : undefined;
         return [{
           id,
-          type: type as "subagent-start" | "subagent-result",
+          type: type as "subagent-start" | "subagent-progress" | "subagent-result",
           toolCallId: typeof raw.toolCallId === "string" ? raw.toolCallId : id,
           agentName: typeof raw.agentName === "string" ? raw.agentName : undefined,
           prompt: typeof raw.prompt === "string" ? raw.prompt : undefined,
+          text: typeof raw.text === "string" ? raw.text : undefined,
+          status: status === "active" || status === "complete" || status === "error" ? status : undefined,
           result: raw.result,
         }];
       }

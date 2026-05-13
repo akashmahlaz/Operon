@@ -305,7 +305,7 @@ function ProgressLine({ ev }: { ev: ProgressEvent }) {
   const complete = ev.status === "complete";
   const error = ev.status === "error";
   return (
-    <div className="flex items-center gap-2 py-1 text-[12px] italic text-muted-foreground/75">
+    <div className="flex items-center gap-2 py-0.5 text-[12px] italic text-muted-foreground/75" role="status" aria-live="polite">
       {complete ? (
         <Check className="size-3 shrink-0 text-muted-foreground/70" />
       ) : error ? (
@@ -448,8 +448,10 @@ function CommandButton({ ev }: { ev: CommandButtonEvent }) {
 
 function SubagentCard({ events }: { events: SubagentEvent[] }) {
   const start = events.find((event) => event.type === "subagent-start");
+  const progress = events.filter((event) => event.type === "subagent-progress");
   const result = [...events].reverse().find((event) => event.type === "subagent-result");
   const agentName = result?.agentName ?? start?.agentName ?? "subagent";
+  const latestProgress = [...progress].reverse()[0];
   const resultText = typeof result?.result === "string"
     ? result.result
     : result?.result == null
@@ -457,15 +459,18 @@ function SubagentCard({ events }: { events: SubagentEvent[] }) {
       : JSON.stringify(result.result, null, 2);
 
   return (
-    <div className="my-1 rounded-md border border-border/70 bg-muted/25 px-3 py-2 text-[12.5px]">
+    <div className="my-1 rounded-md border border-border/70 bg-muted/25 px-3 py-2 text-[12.5px]" role="status" aria-live="polite">
       <div className="flex items-center gap-2 text-muted-foreground">
-        {result ? <Check className="size-3.5" /> : <Loader2 className="size-3.5 animate-spin" />}
+        {result || latestProgress?.status === "complete" ? <Check className="size-3.5" /> : latestProgress?.status === "error" ? <AlertCircle className="size-3.5 text-destructive" /> : <Loader2 className="size-3.5 animate-spin" />}
         <span className="font-medium text-foreground/85">
           {result ? `Completed ${agentName}` : `Delegating to ${agentName}`}
         </span>
       </div>
       {start?.prompt && (
         <div className="mt-1 line-clamp-2 text-muted-foreground/75">{start.prompt}</div>
+      )}
+      {latestProgress?.text && !result && (
+        <div className="mt-1 text-muted-foreground/75">{latestProgress.text}</div>
       )}
       {resultText && (
         <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded border border-border/50 bg-background/60 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
@@ -936,7 +941,7 @@ function buildSegments(parts: StreamPart[]): RenderSegment[] {
       segs.push({ kind: "confirmation", ev: part as ConfirmationEvent });
     } else if (part.type === "command-button") {
       segs.push({ kind: "command-button", ev: part as CommandButtonEvent });
-    } else if (part.type === "subagent-start" || part.type === "subagent-result") {
+    } else if (part.type === "subagent-start" || part.type === "subagent-progress" || part.type === "subagent-result") {
       const subagent = part as SubagentEvent;
       const lastSubagent = last?.kind === "subagent" ? last : undefined;
       if (lastSubagent && lastSubagent.events.some((event) => event.toolCallId === subagent.toolCallId)) {
@@ -1002,7 +1007,7 @@ function StreamingText({ text, isStreaming }: { text: string; isStreaming: boole
 // ---------------------------------------------------------------------------
 function UserMessage({ text }: { text: string }) {
   return (
-    <div className="group/user flex max-w-4xl items-start gap-2.5 py-3">
+    <div className="group/user flex max-w-4xl items-start gap-2.5 py-2.5">
       <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/35 text-muted-foreground">
         <UserRound className="size-3.5" />
       </div>
@@ -1055,7 +1060,7 @@ function StreamingAssistantMessage({
   const showWorking = isStreamingThis && !hasText;
 
   return (
-    <div className="group/msg py-3">
+    <div className="group/msg py-2.5">
       {showWorking && (
         <div className="mb-2 flex items-center gap-2 text-[12px] text-muted-foreground">
           <Loader2 className="size-3 animate-spin" />
@@ -1329,6 +1334,7 @@ function UsedReferencesSection({ segments }: { segments: RenderSegment[] }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className="inline-flex items-center gap-1 text-muted-foreground/70 hover:text-muted-foreground"
       >
         <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />

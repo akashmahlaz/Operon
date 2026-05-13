@@ -28,6 +28,7 @@ export type ContentPartType =
   | "confirmation"
   | "command-button"
   | "subagent-start"
+  | "subagent-progress"
   | "subagent-result"
   | "warning"
   | "usage";
@@ -46,7 +47,7 @@ export interface ToolCallEvent {
   args?: Record<string, unknown>;
   result?: unknown;
   errorText?: string;
-  /** Present-tense status shown while running ("Reading file `foo.ts`â€¦"). */
+  /** Present-tense status shown while running. */
   invocationMessage?: string;
   /** Past-tense status shown after completion ("Read file `foo.ts`"). */
   pastTenseMessage?: string;
@@ -74,7 +75,7 @@ export interface SourceUrlEvent {
   title?: string;
 }
 
-/** Inline status line ("Reading workspaceâ€¦"). */
+/** Inline status line. */
 export interface ProgressEvent {
   id: string;
   type: "progress";
@@ -85,10 +86,12 @@ export interface ProgressEvent {
 /** Subagent lifecycle rows, modelled after VS Code's runSubagent tool data. */
 export interface SubagentEvent {
   id: string;
-  type: "subagent-start" | "subagent-result";
+  type: "subagent-start" | "subagent-progress" | "subagent-result";
   toolCallId: string;
   agentName?: string;
   prompt?: string;
+  text?: string;
+  status?: "active" | "complete" | "error";
   result?: unknown;
 }
 

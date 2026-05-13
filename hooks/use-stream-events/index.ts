@@ -50,6 +50,7 @@ type SSEEventType =
   | "confirmation"
   | "command-button"
   | "subagent-start"
+  | "subagent-progress"
   | "subagent-result"
   | "warning"
   | "usage"
@@ -82,6 +83,7 @@ interface SSEEvent {
     progressStatus?: "active" | "complete" | "error";
     agentName?: string;
     prompt?: string;
+    subagentStatus?: "active" | "complete" | "error";
     target?: string;
     edits?: unknown;
     isDone?: boolean;
@@ -482,6 +484,17 @@ export function useStreamEvents({
           toolCallId: ev.data.toolCallId ?? nextId(),
           agentName: ev.data.agentName,
           prompt: ev.data.prompt,
+        } satisfies SubagentEvent);
+        break;
+
+      case "subagent-progress":
+        appendPart({
+          id: nextId(),
+          type: "subagent-progress",
+          toolCallId: ev.data.toolCallId ?? nextId(),
+          agentName: ev.data.agentName,
+          text: ev.data.text,
+          status: ev.data.subagentStatus ?? (ev.data.status === "complete" ? "complete" : ev.data.status === "error" ? "error" : "active"),
         } satisfies SubagentEvent);
         break;
 
