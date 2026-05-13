@@ -84,6 +84,8 @@ interface SSEEvent {
     agentName?: string;
     prompt?: string;
     subagentStatus?: "active" | "complete" | "error";
+    runId?: string;
+    logUrl?: string;
     target?: string;
     edits?: unknown;
     isDone?: boolean;
@@ -484,6 +486,8 @@ export function useStreamEvents({
           toolCallId: ev.data.toolCallId ?? nextId(),
           agentName: ev.data.agentName,
           prompt: ev.data.prompt,
+          runId: ev.data.runId,
+          logUrl: ev.data.logUrl,
         } satisfies SubagentEvent);
         break;
 
@@ -495,6 +499,8 @@ export function useStreamEvents({
           agentName: ev.data.agentName,
           text: ev.data.text,
           status: ev.data.subagentStatus ?? (ev.data.status === "complete" ? "complete" : ev.data.status === "error" ? "error" : "active"),
+          runId: ev.data.runId,
+          logUrl: ev.data.logUrl,
         } satisfies SubagentEvent);
         break;
 
@@ -504,6 +510,8 @@ export function useStreamEvents({
           type: "subagent-result",
           toolCallId: ev.data.toolCallId ?? nextId(),
           agentName: ev.data.agentName,
+          runId: ev.data.runId,
+          logUrl: ev.data.logUrl,
           result: ev.data.result,
         } satisfies SubagentEvent);
         break;
@@ -593,7 +601,9 @@ export function useStreamEvents({
       initialProgressPartIdRef.current = null;
       setStatus("submitted");
 
-      // Append user message immediately
+      // Append user message immediately, plus an empty assistant placeholder
+      // so the StreamingAssistantMessage's built-in "Working…" indicator can
+      // render alone (no duplicate progress row).
       const userMsg: StreamingMessage = {
         id: nextId(),
         role: "user",
@@ -601,16 +611,10 @@ export function useStreamEvents({
         isComplete: true,
         isStreaming: false,
       };
-      const initialProgressPart: ProgressEvent = {
-        id: nextId(),
-        type: "progress",
-        text: "Working",
-      };
-      initialProgressPartIdRef.current = initialProgressPart.id;
       assistantMessageRef.current = {
         id: nextId(),
         role: "assistant",
-        orderedParts: [initialProgressPart],
+        orderedParts: [],
         isComplete: false,
         isStreaming: true,
       };

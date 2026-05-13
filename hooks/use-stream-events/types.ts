@@ -92,6 +92,8 @@ export interface SubagentEvent {
   prompt?: string;
   text?: string;
   status?: "active" | "complete" | "error";
+  runId?: string;
+  logUrl?: string;
   result?: unknown;
 }
 

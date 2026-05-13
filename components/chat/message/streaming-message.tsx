@@ -52,7 +52,6 @@ import {
   Share2,
   ThumbsDown,
   ThumbsUp,
-  UserRound,
 } from "lucide-react";
 
 const TOOL_ICONS: Record<string, typeof FileText> = {
@@ -452,6 +451,8 @@ function SubagentCard({ events }: { events: SubagentEvent[] }) {
   const result = [...events].reverse().find((event) => event.type === "subagent-result");
   const agentName = result?.agentName ?? start?.agentName ?? "subagent";
   const latestProgress = [...progress].reverse()[0];
+  const runId = result?.runId ?? latestProgress?.runId ?? start?.runId;
+  const logUrl = result?.logUrl ?? latestProgress?.logUrl ?? start?.logUrl ?? (runId ? `/dashboard/sessions?runId=${encodeURIComponent(runId)}` : undefined);
   const resultText = typeof result?.result === "string"
     ? result.result
     : result?.result == null
@@ -471,6 +472,11 @@ function SubagentCard({ events }: { events: SubagentEvent[] }) {
       )}
       {latestProgress?.text && !result && (
         <div className="mt-1 text-muted-foreground/75">{latestProgress.text}</div>
+      )}
+      {logUrl && (
+        <a href={logUrl} className="mt-2 inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
+          <ExternalLink className="size-3" /> Open child run
+        </a>
       )}
       {resultText && (
         <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded border border-border/50 bg-background/60 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
@@ -1007,11 +1013,8 @@ function StreamingText({ text, isStreaming }: { text: string; isStreaming: boole
 // ---------------------------------------------------------------------------
 function UserMessage({ text }: { text: string }) {
   return (
-    <div className="group/user flex max-w-4xl items-start gap-2.5 py-2.5">
-      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-muted/35 text-muted-foreground">
-        <UserRound className="size-3.5" />
-      </div>
-      <div className="min-w-0 flex-1 rounded-md border border-border/60 bg-muted/35 px-3 py-2">
+    <div className="group/user mt-4 mb-2 flex justify-end">
+      <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-muted/70 px-4 py-2.5">
         <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed text-foreground">
           {text}
         </p>

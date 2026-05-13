@@ -156,6 +156,8 @@ export function hydrateMessageParts(
           prompt: typeof raw.prompt === "string" ? raw.prompt : undefined,
           text: typeof raw.text === "string" ? raw.text : undefined,
           status: status === "active" || status === "complete" || status === "error" ? status : undefined,
+          runId: typeof raw.runId === "string" ? raw.runId : undefined,
+          logUrl: typeof raw.logUrl === "string" ? raw.logUrl : undefined,
           result: raw.result,
         }];
       }
