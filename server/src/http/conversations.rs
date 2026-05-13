@@ -376,7 +376,7 @@ async fn run_compaction(
     user_id: Uuid,
     tx: mpsc::Sender<Value>,
 ) {
-    use crate::agent::openai::{self, ChatMessage};
+    use crate::agent::openai::ChatMessage;
 
     let send = |evt: Value| {
         let tx = tx.clone();
@@ -466,51 +466,58 @@ async fn run_compaction(
             .build()
             .unwrap_or_default();
 
-        // Only the openai-compat chat completions path is supported here; the
-        // Responses API path requires more plumbing and isn't worth it for a
-        // best-effort summariser. Provider-specific routing can be added later.
-        let stream_res =
-            openai::stream_chat(&client, &api_key, &base_url, &model, &messages, &[], None).await;
-
-        match stream_res {
-            Ok(stream) => {
-                tokio::pin!(stream);
-                while let Some(item) = stream.next().await {
-                    match item {
-                        Ok(openai::OpenAiEvent::TextDelta(t)) => {
-                            summary.push_str(&t);
-                            send(compact_event("text-delta", json!({ "text": t }))).await;
-                        }
-                        Ok(openai::OpenAiEvent::Finished { .. }) => break,
-                        Ok(_) => {}
-                        Err(e) => {
-                            send(compact_event(
-                                "progress",
-                                json!({
-                                    "status": "active",
-                                    "text": format!("LLM summary failed ({e}); using fallback"),
-                                }),
-                            ))
-                            .await;
-                            summary.clear();
-                            break;
-                        }
-                    }
-                }
-                if !summary.trim().is_empty() {
-                    used_llm = true;
-                }
-            }
-            Err(e) => {
+        // Up to 2 attempts (1 retry) with a small backoff before falling back
+        // to the heuristic. The provider clients also retry rate limits
+        // internally, so this only catches structural failures.
+        let mut last_err: Option<String> = None;
+        for attempt in 1..=2u32 {
+            summary.clear();
+            if attempt > 1 {
                 send(compact_event(
                     "progress",
                     json!({
                         "status": "active",
-                        "text": format!("LLM unreachable ({e}); using fallback"),
+                        "text": format!("Retrying LLM summary (attempt {attempt}/2)"),
                     }),
                 ))
                 .await;
+                tokio::time::sleep(std::time::Duration::from_millis(750)).await;
             }
+            let summarise_res = summarise_with_provider(
+                &client,
+                &provider,
+                &model,
+                &api_key,
+                &base_url,
+                &messages,
+                &mut summary,
+                &send,
+            )
+            .await;
+            match summarise_res {
+                Ok(()) if !summary.trim().is_empty() => {
+                    used_llm = true;
+                    last_err = None;
+                    break;
+                }
+                Ok(()) => {
+                    last_err = Some("provider returned empty summary".into());
+                }
+                Err(e) => {
+                    last_err = Some(format!("{e}"));
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            send(compact_event(
+                "progress",
+                json!({
+                    "status": "active",
+                    "text": format!("LLM summary failed ({err}); using fallback"),
+                }),
+            ))
+            .await;
+            summary.clear();
         }
     }
 
@@ -609,13 +616,6 @@ async fn resolve_summarisation_provider(
     } else {
         ("openai".to_owned(), model_full)
     };
-    // Skip Responses-API-only models (gpt-5, codex) — see comment above.
-    if crate::agent::openai::requires_responses_api(&model_id) {
-        return None;
-    }
-    if provider == "anthropic" {
-        return None;
-    }
 
     let key_row = sqlx::query(
         "select api_key_ciphertext from provider_profiles where user_id = $1 and provider = $2",
@@ -647,6 +647,56 @@ fn build_summarisation_prompt(rows: &[&sqlx::postgres::PgRow]) -> String {
     buf
 }
 
+/// Stream a summary from the right provider into `summary` and emit
+/// `text-delta` events through `send`. Returns `Ok(())` if the stream
+/// completed cleanly (caller still needs to check `summary` for emptiness).
+async fn summarise_with_provider<F, Fut>(
+    client: &reqwest::Client,
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    base_url: &str,
+    messages: &[crate::agent::openai::ChatMessage],
+    summary: &mut String,
+    send: &F,
+) -> anyhow::Result<()>
+where
+    F: Fn(Value) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    use crate::agent::{anthropic, openai};
+    use futures::future::Either;
+
+    let stream = if provider == "anthropic" {
+        let s = anthropic::stream_chat(client, api_key, model, messages, &[], None).await?;
+        Either::Left(Either::Left(s))
+    } else if provider == "openai" && openai::requires_responses_api(model) {
+        let s = openai::stream_responses(
+            client, api_key, base_url, model, messages, &[], None,
+        )
+        .await?;
+        Either::Left(Either::Right(s))
+    } else {
+        let s = openai::stream_chat(client, api_key, base_url, model, messages, &[], None).await?;
+        Either::Right(s)
+    };
+    tokio::pin!(stream);
+
+    use futures::StreamExt as _;
+    while let Some(item) = stream.next().await {
+        match item? {
+            openai::OpenAiEvent::TextDelta(t) => {
+                summary.push_str(&t);
+                send(compact_event("text-delta", json!({ "text": t }))).await;
+            }
+            openai::OpenAiEvent::Finished { .. } => break,
+            // ignore reasoning, tool calls, usage, retries, request-id
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn heuristic_summary(rows: &[&sqlx::postgres::PgRow]) -> String {
     let user_count = rows
         .iter()
@@ -656,19 +706,64 @@ fn heuristic_summary(rows: &[&sqlx::postgres::PgRow]) -> String {
         .iter()
         .filter(|r| r.try_get::<String, _>("role").map(|s| s == "assistant").unwrap_or(false))
         .count();
-    let mut snippets: Vec<String> = Vec::new();
-    for r in rows.iter().take(6) {
-        let role: String = r.try_get("role").unwrap_or_default();
-        let content: String = r.try_get("content").unwrap_or_default();
-        if role == "user" {
-            let s: String = content.chars().take(120).collect();
-            snippets.push(format!("- {s}"));
+
+    // Pull the first user prompt (the original goal), the most recent
+    // assistant reply (latest answer), and bullets from the most recent few
+    // user prompts (recent intent). This is far more useful than the original
+    // "first 6 user messages" version.
+    let trim = |s: &str, n: usize| -> String {
+        let mut out: String = s.chars().take(n).collect();
+        if s.chars().count() > n {
+            out.push('…');
         }
+        out
+    };
+
+    let first_user = rows
+        .iter()
+        .find(|r| r.try_get::<String, _>("role").map(|s| s == "user").unwrap_or(false))
+        .and_then(|r| r.try_get::<String, _>("content").ok())
+        .map(|c| trim(c.trim(), 240));
+
+    let last_assistant = rows
+        .iter()
+        .rev()
+        .find(|r| {
+            r.try_get::<String, _>("role")
+                .map(|s| s == "assistant")
+                .unwrap_or(false)
+        })
+        .and_then(|r| r.try_get::<String, _>("content").ok())
+        .map(|c| trim(c.trim(), 320));
+
+    let recent_user_prompts: Vec<String> = rows
+        .iter()
+        .rev()
+        .filter(|r| r.try_get::<String, _>("role").map(|s| s == "user").unwrap_or(false))
+        .take(5)
+        .filter_map(|r| r.try_get::<String, _>("content").ok())
+        .map(|c| format!("- {}", trim(c.trim(), 140)))
+        .collect();
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "Earlier in this conversation: {user_count} user message(s) and {asst_count} assistant response(s).\n\n"
+    ));
+    if let Some(g) = first_user {
+        out.push_str(&format!("Original goal:\n- {g}\n\n"));
     }
-    format!(
-        "Earlier in this conversation: {user_count} user message(s) and {asst_count} assistant response(s).\nHighlights:\n{}",
-        snippets.join("\n")
-    )
+    if !recent_user_prompts.is_empty() {
+        out.push_str("Recent user requests (most recent first):\n");
+        for p in &recent_user_prompts {
+            out.push_str(p);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    if let Some(a) = last_assistant {
+        out.push_str(&format!("Last assistant reply:\n- {a}\n"));
+    }
+    out
 }
 
 // ─────────────────────────────────────────────────────────────────────────

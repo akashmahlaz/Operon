@@ -667,6 +667,16 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                             &id,
                         ))
                         .await?;
+                    // Persist on the run row so dashboard log/sessions can
+                    // display it after the stream ends. Keep only the latest
+                    // id (multiple model calls per run = last one wins).
+                    let _ = sqlx::query(
+                        "update runs set provider_request_id = $1, updated_at = now() where id = $2",
+                    )
+                    .bind(&id)
+                    .bind(spec.run_id)
+                    .execute(&spec.db)
+                    .await;
                     provider_request_id = Some(id);
                 }
                 OpenAiEvent::Finished {
