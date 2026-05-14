@@ -280,6 +280,23 @@ pub fn subagent_progress(
     })
 }
 
+pub fn subagent_stream_delta(
+    tool_call_id: &str,
+    agent_name: Option<&str>,
+    kind: &str,
+    text: &str,
+) -> Value {
+    json!({
+        "type": "subagent-stream-delta",
+        "data": {
+            "toolCallId": tool_call_id,
+            "agentName": agent_name,
+            "kind": kind,
+            "text": text,
+        }
+    })
+}
+
 pub fn subagent_result(
     tool_call_id: &str,
     agent_name: Option<&str>,

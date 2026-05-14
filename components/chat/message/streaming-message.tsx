@@ -471,6 +471,10 @@ function SubagentCard({ events }: { events: SubagentEvent[] }) {
   const start = events.find((event) => event.type === "subagent-start");
   const progress = events.filter((event) => event.type === "subagent-progress");
   const result = [...events].reverse().find((event) => event.type === "subagent-result");
+  const streamText = events
+    .filter((event) => event.type === "subagent-stream-delta" && (event.kind ?? "text") === "text")
+    .map((event) => event.text ?? "")
+    .join("");
   const agentName = result?.agentName ?? start?.agentName ?? "subagent";
   const latestProgress = [...progress].reverse()[0];
   const runId = result?.runId ?? latestProgress?.runId ?? start?.runId;
@@ -492,7 +496,13 @@ function SubagentCard({ events }: { events: SubagentEvent[] }) {
       {start?.prompt && (
         <div className="mt-1 line-clamp-2 text-muted-foreground/75">{start.prompt}</div>
       )}
-      {latestProgress?.text && !result && (
+      {streamText && !result && (
+        <div className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap border-l-2 border-border/50 pl-2 text-[12px] italic text-muted-foreground/80">
+          {streamText}
+          <span className="ml-px inline-block h-[0.9em] w-[1px] -translate-y-[1px] animate-pulse bg-current align-middle" />
+        </div>
+      )}
+      {latestProgress?.text && !streamText && !result && (
         <div className="mt-1 text-muted-foreground/75">{latestProgress.text}</div>
       )}
       {logUrl && (
@@ -970,7 +980,12 @@ function buildSegments(parts: StreamPart[]): RenderSegment[] {
       segs.push({ kind: "confirmation", ev: part as ConfirmationEvent });
     } else if (part.type === "command-button") {
       segs.push({ kind: "command-button", ev: part as CommandButtonEvent });
-    } else if (part.type === "subagent-start" || part.type === "subagent-progress" || part.type === "subagent-result") {
+    } else if (
+      part.type === "subagent-start" ||
+      part.type === "subagent-progress" ||
+      part.type === "subagent-stream-delta" ||
+      part.type === "subagent-result"
+    ) {
       const subagent = part as SubagentEvent;
       const lastSubagent = last?.kind === "subagent" ? last : undefined;
       if (lastSubagent && lastSubagent.events.some((event) => event.toolCallId === subagent.toolCallId)) {

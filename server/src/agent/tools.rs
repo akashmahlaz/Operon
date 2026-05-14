@@ -499,6 +499,25 @@ fn all_tool_definitions() -> Vec<Value> {
                 }
             }),
         ),
+        tool_def(
+            "spawn_subagent",
+            "Delegate a focused sub-task to a child agent that streams its output live back into this conversation. Use sparingly for parallelizable read-only research, summarization, or multi-step exploration. The subagent inherits this run's provider, model, channel and credentials but runs with an isolated, tighter step budget.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["prompt"],
+                "properties": {
+                    "agent": {
+                        "type": "string",
+                        "description": "Optional human-readable name for the subagent (e.g. 'explore', 'summarize'). Used as a label only."
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "The full instruction the subagent should execute. Be specific — the subagent has no other context."
+                    }
+                }
+            }),
+        ),
     ]
 }
 

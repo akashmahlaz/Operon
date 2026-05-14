@@ -53,6 +53,7 @@ type SSEEventType =
   | "command-button"
   | "subagent-start"
   | "subagent-progress"
+  | "subagent-stream-delta"
   | "subagent-result"
   | "warning"
   | "usage"
@@ -104,6 +105,7 @@ interface SSEEvent {
     provider?: string | null;
     model?: string;
     requestId?: string | null;
+    kind?: string;
   };
 }
 
@@ -509,6 +511,17 @@ export function useStreamEvents({
           status: ev.data.subagentStatus ?? (ev.data.status === "complete" ? "complete" : ev.data.status === "error" ? "error" : "active"),
           runId: ev.data.runId,
           logUrl: ev.data.logUrl,
+        } satisfies SubagentEvent);
+        break;
+
+      case "subagent-stream-delta":
+        appendPart({
+          id: nextId(),
+          type: "subagent-stream-delta",
+          toolCallId: ev.data.toolCallId ?? nextId(),
+          agentName: ev.data.agentName,
+          kind: ev.data.kind === "reasoning" || ev.data.kind === "tool" ? ev.data.kind : "text",
+          text: ev.data.text ?? "",
         } satisfies SubagentEvent);
         break;
 

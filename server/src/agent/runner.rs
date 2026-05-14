@@ -408,6 +408,10 @@ pub struct RunnerSpec {
     /// Reasoning effort hint forwarded to the provider. One of
     /// "none" | "auto" | "low" | "medium" | "high".
     pub reasoning_level: Option<String>,
+    /// In-memory registry of live runs. Used so that subagent child runs
+    /// spawned from inside the agent loop are also discoverable for SSE
+    /// tailing and cancellation by other endpoints.
+    pub agents: super::registry::AgentRegistry,
 }
 
 pub fn spawn(spec: RunnerSpec) -> RunHandle {
@@ -874,8 +878,25 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                 "state": "executing",
             }));
 
-            let dispatch_result =
-                tools::dispatch(&agent_ctx, &tc.function.name, &parsed_input).await;
+            let dispatch_result = if is_subagent {
+                execute_subagent(
+                    &spec,
+                    &handle,
+                    &agent_ctx,
+                    &tc.id,
+                    parsed_input
+                        .get("agent")
+                        .or_else(|| parsed_input.get("agentName"))
+                        .and_then(Value::as_str),
+                    parsed_input
+                        .get("prompt")
+                        .and_then(Value::as_str)
+                        .unwrap_or(""),
+                )
+                .await
+            } else {
+                tools::dispatch(&agent_ctx, &tc.function.name, &parsed_input).await
+            };
             let (result_value, error_text) = match dispatch_result {
                 Ok(value) => {
                     if tc.function.name == "tool_search" {
@@ -1228,6 +1249,173 @@ pub fn default_max_steps() -> usize {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_MAX_STEPS)
+}
+
+/// Spawn a child subagent run inheriting the parent's provider/model/keys
+/// and forward its event stream live into the parent run as
+/// `subagent-stream-delta` and `subagent-progress` events. Blocks until the
+/// child emits `message-end` (or fails / is cancelled).
+///
+/// Returns a JSON value containing `runId`, `agent`, `prompt`, `finalText`
+/// and `logUrl` for the parent runner to record as the tool result.
+async fn execute_subagent(
+    parent_spec: &RunnerSpec,
+    parent_handle: &RunHandle,
+    parent_ctx: &tools::AgentContext,
+    parent_tool_call_id: &str,
+    agent_name: Option<&str>,
+    prompt: &str,
+) -> Result<Value> {
+    if prompt.trim().is_empty() {
+        anyhow::bail!("subagent prompt is required");
+    }
+
+    let child_run_id = Uuid::now_v7();
+    let metadata = json!({
+        "kind": "subagent",
+        "agent": agent_name,
+        "parentRunId": parent_spec.run_id.to_string(),
+        "parentToolCallId": parent_tool_call_id,
+    });
+
+    sqlx::query(
+        "insert into runs (id, conversation_id, user_id, status, model, parent_run_id, parent_tool_call_id, metadata) values ($1, $2, $3, 'queued', $4, $5, $6, $7)",
+    )
+    .bind(child_run_id)
+    .bind(parent_spec.conversation_id)
+    .bind(parent_spec.user_id)
+    .bind(format!("{}:{}", parent_spec.provider, parent_spec.model))
+    .bind(parent_spec.run_id)
+    .bind(parent_tool_call_id)
+    .bind(&metadata)
+    .execute(&parent_spec.db)
+    .await
+    .context("inserting subagent child run row")?;
+
+    let child_spec = RunnerSpec {
+        run_id: child_run_id,
+        user_id: parent_spec.user_id,
+        conversation_id: parent_spec.conversation_id,
+        provider: parent_spec.provider.clone(),
+        model: parent_spec.model.clone(),
+        openai_api_key: parent_spec.openai_api_key.clone(),
+        base_url: parent_spec.base_url.clone(),
+        workspace: parent_ctx.workspace.clone(),
+        github_token: parent_ctx.github_token.clone(),
+        initial_user_message: prompt.to_string(),
+        db: parent_spec.db.clone(),
+        max_steps: default_subagent_max_steps(),
+        channel: parent_spec.channel.clone(),
+        next_base_url: parent_spec.next_base_url.clone(),
+        next_service_token: parent_spec.next_service_token.clone(),
+        reasoning_level: parent_spec.reasoning_level.clone(),
+        agents: parent_spec.agents.clone(),
+    };
+
+    let child_handle = spawn(child_spec);
+    parent_spec.agents.insert(child_handle.clone());
+
+    // Cancel the child if the parent is cancelled.
+    let child_cancel = child_handle.cancel.clone();
+    let parent_cancel = parent_handle.cancel.clone();
+    let cancel_link = tokio::spawn(async move {
+        parent_cancel.cancelled().await;
+        child_cancel.cancel();
+    });
+
+    let mut rx = child_handle.subscribe();
+    let mut final_text = String::new();
+    let mut had_error: Option<String> = None;
+
+    loop {
+        match rx.recv().await {
+            Ok(event) => {
+                let frame = &event.frame;
+                let event_type = frame
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let data = frame.get("data");
+                match event_type {
+                    "text-delta" => {
+                        if let Some(text) =
+                            data.and_then(|d| d.get("text")).and_then(Value::as_str)
+                        {
+                            final_text.push_str(text);
+                            let _ = parent_handle
+                                .emit(&events::subagent_stream_delta(
+                                    parent_tool_call_id,
+                                    agent_name,
+                                    "text",
+                                    text,
+                                ))
+                                .await;
+                        }
+                    }
+                    "tool-call-update" | "tool-call-input-available" => {
+                        if let Some(msg) = data
+                            .and_then(|d| d.get("invocationMessage"))
+                            .and_then(Value::as_str)
+                        {
+                            let _ = parent_handle
+                                .emit(&events::subagent_progress(
+                                    parent_tool_call_id,
+                                    agent_name,
+                                    msg,
+                                    "active",
+                                ))
+                                .await;
+                        }
+                    }
+                    "error" => {
+                        if let Some(text) = data
+                            .and_then(|d| d.get("errorText"))
+                            .and_then(Value::as_str)
+                        {
+                            had_error = Some(text.to_string());
+                            let _ = parent_handle
+                                .emit(&events::subagent_progress(
+                                    parent_tool_call_id,
+                                    agent_name,
+                                    text,
+                                    "error",
+                                ))
+                                .await;
+                        }
+                    }
+                    "message-end" => break,
+                    _ => {}
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                // We dropped some frames; keep going from the latest position.
+                continue;
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+
+    cancel_link.abort();
+    parent_spec.agents.remove(&child_run_id);
+
+    if let Some(err) = had_error {
+        return Ok(json!({
+            "runId": child_run_id.to_string(),
+            "agent": agent_name,
+            "prompt": prompt,
+            "finalText": final_text,
+            "error": err,
+            "logUrl": format!("/dashboard/sessions?runId={child_run_id}"),
+        }));
+    }
+
+    Ok(json!({
+        "runId": child_run_id.to_string(),
+        "agent": agent_name,
+        "prompt": prompt,
+        "finalText": final_text,
+        "logUrl": format!("/dashboard/sessions?runId={child_run_id}"),
+    }))
 }
 
 /// Tighter step budget for subagent runs (runs created with a `parent_run_id`).

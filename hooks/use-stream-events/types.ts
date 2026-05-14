@@ -29,6 +29,7 @@ export type ContentPartType =
   | "command-button"
   | "subagent-start"
   | "subagent-progress"
+  | "subagent-stream-delta"
   | "subagent-result"
   | "warning"
   | "usage"
@@ -88,11 +89,13 @@ export interface ProgressEvent {
 /** Subagent lifecycle rows, modelled after VS Code's runSubagent tool data. */
 export interface SubagentEvent {
   id: string;
-  type: "subagent-start" | "subagent-progress" | "subagent-result";
+  type: "subagent-start" | "subagent-progress" | "subagent-stream-delta" | "subagent-result";
   toolCallId: string;
   agentName?: string;
   prompt?: string;
   text?: string;
+  /** For subagent-stream-delta: which child stream this chunk came from. */
+  kind?: "text" | "reasoning" | "tool";
   status?: "active" | "complete" | "error";
   runId?: string;
   logUrl?: string;
