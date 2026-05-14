@@ -4,23 +4,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Activity,
   BarChart3,
-  Bot,
   CheckCircle2,
   Loader2,
   PauseCircle,
   PlayCircle,
-  Send,
   Sparkles,
   TrendingUp,
-  Wand2,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { operonToken } from "@/lib/operon-api";
 
 interface MetaStatus {
@@ -59,14 +54,6 @@ interface CampaignInsight {
   reach?: string;
 }
 
-interface AiTimelineEvent {
-  id: string;
-  time: string;
-  title: string;
-  detail: string;
-  level: "info" | "success";
-}
-
 function authHeaders(extra?: Record<string, string>) {
   const headers = new Headers(extra);
   const token = operonToken();
@@ -85,7 +72,6 @@ export default function FacebookWorkspacePage() {
   const [status, setStatus] = useState<MetaStatus>({ connected: false });
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
-  const [oauthConnecting, setOauthConnecting] = useState(false);
   const [metaToken, setMetaToken] = useState("");
 
   const [accounts, setAccounts] = useState<MetaAccount[]>([]);
@@ -98,26 +84,8 @@ export default function FacebookWorkspacePage() {
   const [insights, setInsights] = useState<CampaignInsight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<"pause" | "resume" | null>(null);
-  const [aiCommand, setAiCommand] = useState("");
-  const [aiRunning, setAiRunning] = useState(false);
-  const [timeline, setTimeline] = useState<AiTimelineEvent[]>([]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("connected") === "meta") {
-        toast.success("Meta OAuth connected");
-        params.delete("connected");
-        const next = params.toString();
-        window.history.replaceState({}, "", `${window.location.pathname}${next ? `?${next}` : ""}`);
-      } else if (params.get("error")) {
-        toast.error(`Meta OAuth failed: ${params.get("error")}`);
-        params.delete("error");
-        const next = params.toString();
-        window.history.replaceState({}, "", `${window.location.pathname}${next ? `?${next}` : ""}`);
-      }
-    }
-
     void refreshStatus();
   }, []);
 
@@ -159,19 +127,6 @@ export default function FacebookWorkspacePage() {
     };
   }, [selectedCampaign, selectedAccount?.currency]);
 
-  function pushTimeline(title: string, detail: string, level: "info" | "success" = "info") {
-    setTimeline((prev) => [
-      {
-        id: crypto.randomUUID(),
-        time: new Date().toLocaleTimeString(),
-        title,
-        detail,
-        level,
-      },
-      ...prev,
-    ]);
-  }
-
   async function refreshStatus() {
     setLoading(true);
     try {
@@ -188,11 +143,6 @@ export default function FacebookWorkspacePage() {
         setAccounts(nextAccounts);
         const firstAccountId = nextAccounts[0]?.id ?? "";
         setSelectedAccountId((current) => current || firstAccountId);
-        pushTimeline(
-          "Meta connection active",
-          `${data.user?.name ?? "User"} connected with ${data.adAccountsCount ?? 0} ad account(s).`,
-          "success",
-        );
       } else {
         setAccounts([]);
         setSelectedAccountId("");
@@ -224,7 +174,6 @@ export default function FacebookWorkspacePage() {
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed to connect Meta account");
       toast.success("Facebook connected successfully");
-      pushTimeline("Facebook connected", "Credentials stored and ad operations unlocked.", "success");
       setMetaToken("");
       await refreshStatus();
     } catch (err) {
@@ -233,37 +182,6 @@ export default function FacebookWorkspacePage() {
     } finally {
       setConnecting(false);
     }
-  }
-
-  function connectMetaOAuth() {
-    const token = operonToken();
-    if (!token) {
-      toast.error("Sign in required");
-      return;
-    }
-
-    setOauthConnecting(true);
-    const start = async () => {
-      try {
-        const res = await fetch("/api/social/meta/oauth/start", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ redirect: "/dashboard/social/facebook" }),
-        });
-        const data = (await res.json()) as { authUrl?: string; error?: string };
-        if (!res.ok || !data.authUrl) throw new Error(data.error ?? "Failed to start OAuth");
-        window.location.href = data.authUrl;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to start OAuth";
-        toast.error(message);
-        setOauthConnecting(false);
-      }
-    };
-
-    void start();
   }
 
   async function loadCampaigns(accountId: string) {
@@ -282,11 +200,6 @@ export default function FacebookWorkspacePage() {
       const nextCampaigns = data.campaigns ?? [];
       setCampaigns(nextCampaigns);
       setSelectedCampaignId(nextCampaigns[0]?.id ?? "");
-      pushTimeline(
-        "Campaigns synced",
-        `Loaded ${nextCampaigns.length} campaign(s) from selected ad account.`,
-        "info",
-      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load campaigns";
       toast.error(message);
@@ -309,7 +222,6 @@ export default function FacebookWorkspacePage() {
       const data = (await res.json()) as { insights?: CampaignInsight[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed to load campaign insights");
       setInsights(data.insights ?? []);
-      pushTimeline("Insights refreshed", `Loaded ${data.insights?.length ?? 0} insight row(s).`, "info");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load insights";
       toast.error(message);
@@ -335,56 +247,12 @@ export default function FacebookWorkspacePage() {
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed to update campaign");
       toast.success(`Campaign ${action} request sent`);
-      pushTimeline(
-        action === "pause" ? "Campaign paused" : "Campaign resumed",
-        `Campaign ${selectedCampaign?.name ?? selectedCampaignId} ${action} operation succeeded.`,
-        "success",
-      );
       await loadCampaigns(selectedAccountId);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Campaign action failed";
       toast.error(message);
     } finally {
       setActionLoading(null);
-    }
-  }
-
-  async function runAiCommand(command: string) {
-    const normalized = command.trim().toLowerCase();
-    if (!normalized) {
-      toast.error("Enter an AI command first");
-      return;
-    }
-
-    setAiRunning(true);
-    pushTimeline("AI command received", command, "info");
-
-    try {
-      if (normalized.includes("pause")) {
-        await updateCampaign("pause");
-      } else if (normalized.includes("resume") || normalized.includes("reactivate")) {
-        await updateCampaign("resume");
-      } else if (normalized.includes("refresh campaigns") || normalized.includes("load campaigns")) {
-        await loadCampaigns(selectedAccountId);
-      } else if (normalized.includes("refresh insights") || normalized.includes("analyze performance")) {
-        await loadInsights(selectedCampaignId);
-      } else {
-        await loadInsights(selectedCampaignId);
-        pushTimeline(
-          "AI strategy generated",
-          "Generated ad set strategy and recommendations from current campaign signals.",
-          "success",
-        );
-      }
-
-      pushTimeline(
-        "AI workflow completed",
-        "Execution finished. Continue with next instruction or open chat for deeper automation.",
-        "success",
-      );
-      setAiCommand("");
-    } finally {
-      setAiRunning(false);
     }
   }
 
@@ -435,22 +303,9 @@ export default function FacebookWorkspacePage() {
               <div className="rounded-2xl border border-border/70 bg-card/70 p-6">
                 <h2 className="text-sm font-semibold text-foreground">Connect Facebook (Meta)</h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Connect with OAuth for a secure one-click setup, or paste an access token as fallback.
+                  Paste a Meta user access token with ads scopes. Operon stores it securely and enables campaign operations.
                 </p>
                 <div className="mt-5 space-y-3">
-                  <Button onClick={connectMetaOAuth} disabled={oauthConnecting} className="w-full">
-                    {oauthConnecting ? (
-                      <>
-                        <Loader2 className="mr-2 size-4 animate-spin" />
-                        Redirecting to Facebook OAuth
-                      </>
-                    ) : (
-                      "Connect with Facebook OAuth"
-                    )}
-                  </Button>
-
-                  <div className="text-center text-xs text-muted-foreground">or use access token</div>
-
                   <Input
                     value={metaToken}
                     onChange={(e) => setMetaToken(e.target.value)}
@@ -467,11 +322,6 @@ export default function FacebookWorkspacePage() {
                       "Connect Facebook"
                     )}
                   </Button>
-
-                  <div className="rounded-lg border border-border/70 bg-background/80 p-3 text-xs text-muted-foreground">
-                    OAuth diagnostics: ensure META_APP_ID and META_APP_SECRET are configured. Callback URL should be:
-                    <div className="mt-1 font-medium text-foreground">/api/social/meta/oauth/callback</div>
-                  </div>
                 </div>
               </div>
 
@@ -482,28 +332,11 @@ export default function FacebookWorkspacePage() {
                   <p>2. Pull campaign insights for the last 7 days.</p>
                   <p>3. Pause or resume campaign execution directly.</p>
                   <p>4. Generate AI ad set blueprints from live campaign context.</p>
-                  <p>5. Route all execution through AI prompts after connection.</p>
                 </div>
               </div>
             </div>
           ) : (
             <>
-              <div className="rounded-2xl border border-emerald-300/40 bg-emerald-50/40 p-6 dark:border-emerald-500/40 dark:bg-emerald-500/10">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
-                      AI Operator Enabled for Facebook Ads
-                    </p>
-                    <p className="mt-1 text-sm text-emerald-700/90 dark:text-emerald-200/90">
-                      You are connected. Now you can run campaign planning, ad set generation, optimization, and control actions directly from AI.
-                    </p>
-                  </div>
-                  <Button asChild variant="outline" className="border-emerald-300/70 bg-background/80">
-                    <Link href="/dashboard/chat">Open Chat and Operate with AI</Link>
-                  </Button>
-                </div>
-              </div>
-
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <MetricCard
                   icon={<CheckCircle2 className="size-4 text-emerald-600" />}
@@ -645,48 +478,6 @@ export default function FacebookWorkspacePage() {
                     Operon creates an ad-set blueprint from live campaign data and recent insights.
                   </p>
 
-                  <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                    <div className="rounded-xl border border-border/70 bg-background/90 p-4 text-foreground">
-                      Generate campaign and ad set structures from one goal.
-                    </div>
-                    <div className="rounded-xl border border-border/70 bg-background/90 p-4 text-foreground">
-                      Build audiences and budget splits with AI recommendations.
-                    </div>
-                    <div className="rounded-xl border border-border/70 bg-background/90 p-4 text-foreground sm:col-span-2">
-                      Execute pause or resume safely from AI instructions while keeping audit visibility.
-                    </div>
-                  </div>
-
-                  <div className="mt-4 rounded-xl border border-border/70 bg-background/90 p-4">
-                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                      <Bot className="size-3.5" /> AI Command Center
-                    </div>
-                    <Textarea
-                      value={aiCommand}
-                      onChange={(e) => setAiCommand(e.target.value)}
-                      placeholder="Example: Create 3 ad sets, pause low CTR campaigns, and refresh insights"
-                      className="min-h-24"
-                    />
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button size="sm" onClick={() => void runAiCommand(aiCommand)} disabled={aiRunning}>
-                        {aiRunning ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
-                        Run from AI
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          const cmd = "Refresh campaigns and analyze performance";
-                          setAiCommand(cmd);
-                          void runAiCommand(cmd);
-                        }}
-                        disabled={aiRunning || !selectedCampaignId}
-                      >
-                        <Wand2 className="mr-2 size-4" /> Quick optimize
-                      </Button>
-                    </div>
-                  </div>
-
                   <div className="mt-4 overflow-x-auto rounded-xl border border-border/70">
                     <table className="w-full text-sm">
                       <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
@@ -720,45 +511,6 @@ export default function FacebookWorkspacePage() {
                       <p className="mt-2 text-sm text-muted-foreground">
                         Pick a campaign to generate your first AI-operated ad-set plan.
                       </p>
-                    )}
-                  </div>
-
-                  <div className="mt-4 rounded-xl border border-emerald-300/40 bg-emerald-50/40 p-4 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    <p className="text-xs uppercase tracking-wide">What you can do now from AI</p>
-                    <p className="mt-2 text-sm">
-                      "Create 5 ad sets for lead generation, allocate budget by intent segment, pause low CTR sets after 48h, and scale winners by 20%."
-                    </p>
-                  </div>
-
-                  <div className="mt-4 rounded-xl border border-border/70 bg-background/90 p-4">
-                    <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-                      <Activity className="size-3.5" /> AI Activity Timeline
-                    </div>
-                    {timeline.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        No AI actions yet. Run your first command and execution events will appear here.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {timeline.slice(0, 6).map((event) => (
-                          <div key={event.id} className="rounded-lg border border-border/70 p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm font-medium text-foreground">{event.title}</p>
-                              <span
-                                className={
-                                  "text-xs " +
-                                  (event.level === "success"
-                                    ? "text-emerald-600 dark:text-emerald-400"
-                                    : "text-muted-foreground")
-                                }
-                              >
-                                {event.time}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-xs text-muted-foreground">{event.detail}</p>
-                          </div>
-                        ))}
-                      </div>
                     )}
                   </div>
                 </div>
