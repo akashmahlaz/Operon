@@ -5,7 +5,6 @@ import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CodeHighlight } from "@/components/chat/message/parts/code-highlight";
 
 interface TextPartProps {
   text: string;
@@ -35,7 +34,9 @@ function CodeBlock({ children, className }: { children?: React.ReactNode; classN
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </div>
-      <CodeHighlight code={raw} lang={lang} />
+      <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[12.5px] leading-relaxed text-foreground/90">
+        <code className={className}>{raw}</code>
+      </pre>
     </div>
   );
 }
@@ -76,7 +77,7 @@ export function TextPart({ text, isUser, streaming }: TextPartProps) {
 
   if (isUser) {
     return (
-      <div className="max-w-none rounded-md border border-border/60 bg-muted/35 px-3 py-2 text-foreground">
+      <div className="max-w-[82%] rounded-2xl rounded-tr-md bg-primary px-3.5 py-2 text-primary-foreground shadow-xs">
         <p className="whitespace-pre-wrap wrap-break-word text-[14px] leading-relaxed">
           {text}
         </p>
