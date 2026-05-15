@@ -1100,9 +1100,10 @@ function StreamingAssistantMessage({
     .map((e) => e.text)
     .join("");
 
-  // Working indicator: streaming, but no text yet
-  const hasText = segments.some((s) => s.kind === "text" && s.events.some((e) => e.text));
-  const showWorking = isStreamingThis && !hasText;
+  // Working indicator: streaming, but nothing on screen yet. Once any
+  // segment (reasoning, tool, text, …) appears it carries its own active
+  // pulse, so we hide this to avoid duplicate "Working…" indicators.
+  const showWorking = isStreamingThis && segments.length === 0;
 
   return (
     <div className="group/msg py-2.5">
