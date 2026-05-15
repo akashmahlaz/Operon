@@ -67,6 +67,8 @@
   --animate-spin-around: spin-around calc(var(--speed, 3s) * 2) infinite linear;
   --animate-blink: blink 1.2s step-end infinite;
   --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+  --animate-thinking-shimmer: thinking-shimmer 2s linear infinite;
+  --animate-ellipsis: ellipsis steps(4, end) 1s infinite;
   --animate-ripple: ripple var(--duration, 2s) ease calc(var(--i, 0) * 0.2s) infinite;
   --animate-shiny-text: shiny-text 8s infinite;
   --animate-shine: shine var(--duration, 14s) infinite linear;
@@ -135,6 +137,9 @@
   --coral-light: oklch(0.92 0.08 45);
   --success: oklch(0.6 0.18 145);
   --success-light: oklch(0.92 0.05 145);
+
+  /* Lighter band that sweeps across muted streaming text */
+  --thinking-shimmer: oklch(0.205 0.015 247);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -190,6 +195,9 @@
   --coral-light: oklch(0.28 0.08 45);
   --success: oklch(0.65 0.18 145);
   --success-light: oklch(0.25 0.05 145);
+
+  /* Brighter band that sweeps across muted streaming text */
+  --thinking-shimmer: oklch(0.985 0 0);
 }
 
 @layer base {
@@ -274,4 +282,59 @@
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+/* Sweeps a brighter band across muted text via background-clip:text. */
+@keyframes thinking-shimmer {
+  0% { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+/* CSS-only animated ellipsis (”, ".", "..", "...") via content swap. */
+@keyframes ellipsis {
+  0%   { content: ""; }
+  25%  { content: "."; }
+  50%  { content: ".."; }
+  75%  { content: "..."; }
+  to   { content: ""; }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   CHAT STREAMING UTILITIES — "alive" feel
+   ────────────────────────────────────────────────────────────── */
+
+/* A1 — paint the letters with a moving 4-stop gradient. Apply to small
+   muted text spans like ThinkingRun titles or ProgressLine messages. */
+.shimmer-text {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 30%,
+    var(--thinking-shimmer) 50%,
+    var(--muted-foreground) 70%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 400% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: var(--animate-thinking-shimmer);
+  will-change: background-position;
+}
+
+/* A2 — attach a 1s animated ellipsis after an inline element. */
+.animated-ellipsis::after {
+  content: "";
+  display: inline-block;
+  width: 1.25em;
+  text-align: left;
+  animation: var(--animate-ellipsis);
+}
+
+/* A3 — reserve vertical space on the streaming assistant message so the
+   page does not jump as text streams in. Mirrors VS Code’s
+   .chat-most-recent-response { min-height } trick. */
+[data-chat-streaming="true"] {
+  min-height: var(--chat-streaming-min-h, 64px);
 }

@@ -304,6 +304,7 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
 function ProgressLine({ ev }: { ev: ProgressEvent }) {
   const complete = ev.status === "complete";
   const error = ev.status === "error";
+  const active = !complete && !error;
   return (
     <div className="flex items-center gap-2 py-0.5 text-[12px] italic text-muted-foreground/75" role="status" aria-live="polite">
       {complete ? (
@@ -313,7 +314,7 @@ function ProgressLine({ ev }: { ev: ProgressEvent }) {
       ) : (
         <Loader2 className="size-3 shrink-0 animate-spin" />
       )}
-      <span className="truncate">{ev.text}</span>
+      <span className={cn("truncate", active && "shimmer-text animated-ellipsis")}>{ev.text}</span>
     </div>
   );
 }
@@ -671,7 +672,10 @@ function ThinkingRun({
         )}
         <span className={cn("truncate", active && "font-medium text-foreground/85")}>{title.title}</span>
         {title.detail && (
-          <span className="min-w-0 truncate text-muted-foreground/65 animate-(--animate-pulse-soft)">
+          <span className={cn(
+            "min-w-0 truncate text-muted-foreground/65",
+            active ? "shimmer-text animated-ellipsis" : null,
+          )}>
             {title.detail}
           </span>
         )}
@@ -711,7 +715,7 @@ function ThinkingRun({
               <span className="absolute left-0 top-2.5 flex size-3 items-center justify-center bg-background">
                 <ActivePulseDot />
               </span>
-              <span className="animate-(--animate-pulse-soft)">{title.detail ?? title.title}</span>
+              <span className="shimmer-text animated-ellipsis">{title.detail ?? title.title}</span>
             </div>
           )}
         </div>
@@ -1106,11 +1110,13 @@ function StreamingAssistantMessage({
   const showWorking = isStreamingThis && segments.length === 0;
 
   return (
-    <div className="group/msg py-2.5">
+    <div className="group/msg py-2.5" data-chat-streaming={isStreamingThis ? "true" : undefined}>
       {showWorking && (
         <div className="mb-2 flex items-center gap-2 text-[12px] text-muted-foreground">
           <Loader2 className="size-3 animate-spin" />
-          <span>{activeToolNames.length > 0 ? activeToolNames[0] : "Working"}…</span>
+          <span className="animated-ellipsis shimmer-text">
+            {activeToolNames.length > 0 ? activeToolNames[0] : "Working"}
+          </span>
         </div>
       )}
 
