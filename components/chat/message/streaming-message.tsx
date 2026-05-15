@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -535,44 +535,10 @@ function UsageBadge({ ev }: { ev: UsageEvent }) {
 function ToolCallList({ events, onRetry }: { events: ToolCallEvent[]; onRetry?: (ev: ToolCallEvent) => void }) {
   if (!events.length) return null;
   return (
-    <div className="relative ml-0.5 pl-3">
-      {events.map((ev, i) => {
-        const active = isActiveToolState(ev.state);
-        const error = ev.state === "output-error";
-        const only = events.length === 1;
-        const first = i === 0;
-        const last = i === events.length - 1;
-        return (
-          <div key={`${ev.toolCallId}-${i}`} className="relative">
-            <span
-              aria-hidden
-              className={cn(
-                "absolute -left-3 top-0 bottom-0 w-px bg-muted-foreground/55 dark:bg-border/85",
-                only && !active && "hidden",
-                only && active && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]",
-                !only && first && "mask-[linear-gradient(to_bottom,transparent_0_20px,black_20px_100%)]",
-                !only && last && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_100%)]",
-                !only && !first && !last && "mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]",
-              )}
-            />
-            <span className="absolute -left-4 top-3 flex size-2 items-center justify-center bg-background">
-              {active && !error ? (
-                <ActivePulseDot className="size-2" />
-              ) : (
-                <Circle
-                  className={cn(
-                    "size-1.5",
-                    error
-                      ? "fill-destructive text-destructive"
-                      : "fill-background text-muted-foreground/70 dark:text-border",
-                  )}
-                />
-              )}
-            </span>
-            <ToolCallItem event={ev} onRetry={onRetry} />
-          </div>
-        );
-      })}
+    <div className="space-y-0.5">
+      {events.map((ev, i) => (
+        <ToolCallItem key={`${ev.toolCallId}-${i}`} event={ev} onRetry={onRetry} />
+      ))}
     </div>
   );
 }
@@ -602,7 +568,7 @@ function ReasoningBlock({
 
   if (embedded) {
     return (
-      <div className="py-1 pl-6 text-muted-foreground">
+      <div className="py-0.5 text-muted-foreground">
         <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/85">
           {text}
           {isStreaming && (
@@ -688,11 +654,7 @@ function ThinkingRun({
       </button>
 
       {open && (
-        <div className="relative mt-1 space-y-1">
-          <span
-            aria-hidden
-            className="absolute left-1.25 -top-1 h-5 w-3 rounded-bl-[5px] border-l border-b border-muted-foreground/45 dark:border-border/80"
-          />
+        <div className="relative mt-1 ml-1.5 space-y-1 border-l border-border/70 pl-4 dark:border-border/55">
           {segments.map((segment, index) => {
             if (segment.kind === "reasoning") {
               return (
@@ -707,14 +669,7 @@ function ThinkingRun({
             return <ToolCallList key={`tools-${index}`} events={segment.tools} onRetry={onRetry} />;
           })}
           {active && !hasVisibleReasoning && (
-            <div className="relative py-1 pl-6 text-[12.5px] text-muted-foreground/80">
-              <span
-                aria-hidden
-                className="absolute left-1.25 top-0 bottom-0 w-px bg-muted-foreground/55 dark:bg-border/85 mask-[linear-gradient(to_bottom,black_0_5px,transparent_5px_20px,black_20px_100%)]"
-              />
-              <span className="absolute left-0 top-2.5 flex size-3 items-center justify-center bg-background">
-                <ActivePulseDot />
-              </span>
+            <div className="py-0.5 text-[12.5px] text-muted-foreground/80">
               <span className="shimmer-text animated-ellipsis">{title.detail ?? title.title}</span>
             </div>
           )}
@@ -1086,16 +1041,24 @@ function StreamingAssistantMessage({
   onRetryTool?: (ev: ToolCallEvent) => void;
 }) {
   const isStreamingThis = isLoading && !message.isComplete;
-  const segments = buildSegments(message.orderedParts);
-  const renderGroups = groupThinkingRuns(segments);
+  // orderedParts is append-only — length is a stable cheap key.
+  const partsLen = message.orderedParts.length;
+  const segments = useMemo(
+    () => buildSegments(message.orderedParts),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [partsLen, isStreamingThis],
+  );
+  const renderGroups = useMemo(() => groupThinkingRuns(segments), [segments]);
 
   // Active tool names for the reasoning header
-  const activeToolNames = segments
-    .flatMap((s) => (s.kind === "tools" ? s.tools : []))
-    .filter((t) =>
-      isActiveToolState(t.state)
-    )
-    .map((t) => describeTool(t.toolName, t.args));
+  const activeToolNames = useMemo(
+    () =>
+      segments
+        .flatMap((s) => (s.kind === "tools" ? s.tools : []))
+        .filter((t) => isActiveToolState(t.state))
+        .map((t) => describeTool(t.toolName, t.args)),
+    [segments],
+  );
 
   // Full text across all text segments — for copy button
   const allText = segments

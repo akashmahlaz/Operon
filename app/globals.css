@@ -138,8 +138,8 @@
   --success: oklch(0.6 0.18 145);
   --success-light: oklch(0.92 0.05 145);
 
-  /* Lighter band that sweeps across muted streaming text */
-  --thinking-shimmer: oklch(0.205 0.015 247);
+  /* Brand-tinted band that sweeps across muted streaming text. */
+  --thinking-shimmer: oklch(0.55 0.15 195);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -196,8 +196,8 @@
   --success: oklch(0.65 0.18 145);
   --success-light: oklch(0.25 0.05 145);
 
-  /* Brighter band that sweeps across muted streaming text */
-  --thinking-shimmer: oklch(0.985 0 0);
+  /* Brand-tinted band that sweeps across muted streaming text. */
+  --thinking-shimmer: oklch(0.78 0.15 195);
 }
 
 @layer base {
