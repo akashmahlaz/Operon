@@ -44,7 +44,13 @@ export function detectEdit(event: ToolCallEvent): EditPayload | null {
     return parseUnifiedDiff(args.diff as string);
   }
 
-  if (event.toolName === "write_file" && typeof args.path === "string" && typeof args.contents === "string") {
+  // write_file (local coding workspace) and github_write_file (web / GitHub
+  // API mode) share the same args shape: { path, contents }.
+  if (
+    (event.toolName === "write_file" || event.toolName === "github_write_file") &&
+    typeof args.path === "string" &&
+    typeof args.contents === "string"
+  ) {
     const contents = args.contents as string;
     const lines = contents.split("\n");
     return {
