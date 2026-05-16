@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { describeTool } from "@/components/chat/message/parts/tool-part";
 import { CodeHighlight } from "@/components/chat/message/parts/code-highlight";
+import { EditCard, detectEdit } from "@/components/chat/message/parts/edit-card";
 import type {
   StreamingMessage,
   StreamPart,
@@ -53,6 +54,15 @@ import {
   Share2,
   ThumbsDown,
   ThumbsUp,
+  Activity,
+  Book,
+  BookMarked,
+  CircleDot,
+  CirclePlus,
+  GitBranchPlus,
+  GitPullRequestArrow,
+  KeyRound,
+  Upload,
 } from "lucide-react";
 
 const TOOL_ICONS: Record<string, typeof FileText> = {
@@ -79,23 +89,23 @@ const TOOL_ICONS: Record<string, typeof FileText> = {
   generate_image: ImageIcon,
   generate_video: ImageIcon,
   text_to_speech: Mic,
-  github_get_status: GitBranch,
-  github_list_repos: GitBranch,
-  github_get_repo: GitBranch,
+  github_get_status: Activity,
+  github_list_repos: BookMarked,
+  github_get_repo: Book,
   github_list_contents: FolderOpen,
   github_read_file: FileText,
   github_write_file: PencilLine,
   github_search_code: Search,
   github_list_branches: GitBranch,
-  github_create_branch: GitBranch,
-  github_list_issues: MessageSquareText,
-  github_create_issue: MessageSquareText,
+  github_create_branch: GitBranchPlus,
+  github_list_issues: CircleDot,
+  github_create_issue: CirclePlus,
   github_list_prs: GitPullRequest,
   github_list_pull_requests: GitPullRequest,
-  github_create_pr: GitPullRequest,
+  github_create_pr: GitPullRequestArrow,
   github_merge_pr: GitMerge,
-  github_push_files: PencilLine,
-  github_save_token: GitBranch,
+  github_push_files: Upload,
+  github_save_token: KeyRound,
 };
 
 const ACTIVE_TOOL_STATES = ["calling", "input-streaming", "input-available", "executing"] as const;
@@ -159,6 +169,60 @@ function ToolIcon({
   if (pending) return <Loader2 className={cls} />;
   const Icon = TOOL_ICONS[toolName] ?? Check;
   return <Icon className={cls} />;
+}
+
+// ---------------------------------------------------------------------------
+// TruncatedBlock — generic "show more" wrapper for any long, monospace-ish
+// payload (tool input/output, long lists, transcripts). When the content
+// exceeds `collapsedLines`, we cap height with a mask-image fade and surface a
+// "Show N more <label>" pill at the bottom-right. The label is a prop so this
+// works for non-coding tool output too ("rows", "results", "items").
+// ---------------------------------------------------------------------------
+function TruncatedBlock({
+  text,
+  collapsedLines = 12,
+  label = "lines",
+  className,
+}: {
+  text: string;
+  collapsedLines?: number;
+  label?: string;
+  className?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const totalLines = useMemo(() => text.split("\n").length, [text]);
+  const overflow = totalLines > collapsedLines;
+  const hidden = overflow ? totalLines - collapsedLines : 0;
+
+  return (
+    <div className="relative">
+      <div
+        className={cn(
+          "overflow-hidden transition-[max-height] duration-200",
+          overflow && !expanded && "max-h-50 mask-[linear-gradient(to_bottom,#000_calc(100%-32px),transparent)]",
+        )}
+      >
+        <pre className={cn("overflow-x-auto whitespace-pre-wrap break-all font-mono text-foreground/80", className)}>
+          {text}
+        </pre>
+      </div>
+      {overflow && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          className={cn(
+            "mt-1 inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground/85 transition-colors",
+            "hover:border-border hover:bg-muted hover:text-foreground",
+          )}
+        >
+          {expanded ? "Show less" : `Show ${hidden} more ${label}`}
+        </button>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -247,9 +311,7 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
               <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/55">
                 Input
               </div>
-              <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-foreground/80">
-                {JSON.stringify(event.args, null, 2)}
-              </pre>
+              <TruncatedBlock text={JSON.stringify(event.args, null, 2)} label="lines" />
             </div>
           )}
           {event.errorText && (
@@ -284,11 +346,14 @@ function ToolCallItem({ event, onRetry }: { event: ToolCallEvent; onRetry?: (ev:
               <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/55">
                 Output
               </div>
-              <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-foreground/80">
-                {typeof event.result === "string"
-                  ? event.result
-                  : JSON.stringify(event.result, null, 2)}
-              </pre>
+              <TruncatedBlock
+                text={
+                  typeof event.result === "string"
+                    ? event.result
+                    : JSON.stringify(event.result, null, 2)
+                }
+                label={Array.isArray(event.result) ? "items" : "lines"}
+              />
             </div>
           )}
         </div>
@@ -530,15 +595,94 @@ function UsageBadge({ ev }: { ev: UsageEvent }) {
 }
 
 // ---------------------------------------------------------------------------
-// ToolCallList — renders all tool calls in a left-bordered list
+// WorkingSetHeader — VS Code-style "files in scope" pill row at the top of an
+// assistant message. Surfaces unique file paths the agent has touched in this
+// turn (apply_patch / write_file / read_file). Doubles as the "Edited n
+// files" summary chip — clicking a pill scrolls to the matching edit card
+// below. Renders nothing when no file-scoped tools fired (so non-coding
+// turns stay clean).
+// ---------------------------------------------------------------------------
+function WorkingSetHeader({ events }: { events: ToolCallEvent[] }) {
+  const summary = useMemo(() => {
+    const editedSet = new Set<string>();
+    const readSet = new Set<string>();
+    for (const ev of events) {
+      const args = ev.args ?? {};
+      if (ev.toolName === "apply_patch") {
+        // path is in the diff — let EditCard parse it; for the header we
+        // approximate using the result's files_changed array if present.
+        const r = ev.result as { files_changed?: string[] } | undefined;
+        for (const p of r?.files_changed ?? []) editedSet.add(p);
+        continue;
+      }
+      if (ev.toolName === "write_file" && typeof args.path === "string") {
+        editedSet.add(args.path as string);
+        continue;
+      }
+      if ((ev.toolName === "read_file" || ev.toolName === "workspace_file_read") && typeof args.path === "string") {
+        readSet.add(args.path as string);
+      }
+    }
+    return {
+      edited: Array.from(editedSet),
+      read: Array.from(readSet),
+    };
+  }, [events]);
+
+  const totalFiles = summary.edited.length + summary.read.length;
+  if (totalFiles === 0) return null;
+
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-border/50 bg-muted/25 px-2 py-1.5 text-[11px] text-muted-foreground">
+      <span className="mr-1 font-medium text-foreground/75">
+        {summary.edited.length > 0
+          ? `Edited ${summary.edited.length} ${summary.edited.length === 1 ? "file" : "files"}`
+          : `Read ${summary.read.length} ${summary.read.length === 1 ? "file" : "files"}`}
+      </span>
+      {summary.edited.map((p) => (
+        <span
+          key={`e-${p}`}
+          className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10.5px] text-emerald-700 dark:text-emerald-300"
+          title={p}
+        >
+          <PencilLine className="size-2.5" />
+          <span className="max-w-40 truncate">{p.split(/[\\\/]/).pop()}</span>
+        </span>
+      ))}
+      {summary.edited.length === 0 &&
+        summary.read.slice(0, 4).map((p) => (
+          <span
+            key={`r-${p}`}
+            className="inline-flex items-center gap-1 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground/85"
+            title={p}
+          >
+            <FileText className="size-2.5" />
+            <span className="max-w-40 truncate">{p.split(/[\\\/]/).pop()}</span>
+          </span>
+        ))}
+      {summary.edited.length === 0 && summary.read.length > 4 && (
+        <span className="text-muted-foreground/65">+{summary.read.length - 4} more</span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ToolCallList — renders all tool calls in a left-bordered list. Edit-shaped
+// tool calls (apply_patch / write_file) render as inline diff cards instead
+// of generic pills.
 // ---------------------------------------------------------------------------
 function ToolCallList({ events, onRetry }: { events: ToolCallEvent[]; onRetry?: (ev: ToolCallEvent) => void }) {
   if (!events.length) return null;
   return (
     <div className="space-y-0.5">
-      {events.map((ev, i) => (
-        <ToolCallItem key={`${ev.toolCallId}-${i}`} event={ev} onRetry={onRetry} />
-      ))}
+      {events.map((ev, i) => {
+        const edit = detectEdit(ev);
+        if (edit) {
+          return <EditCard key={`${ev.toolCallId}-${i}`} event={ev} payload={edit} />;
+        }
+        return <ToolCallItem key={`${ev.toolCallId}-${i}`} event={ev} onRetry={onRetry} />;
+      })}
     </div>
   );
 }
@@ -568,7 +712,18 @@ function ReasoningBlock({
 
   if (embedded) {
     return (
-      <div className="py-0.5 text-muted-foreground">
+      <div
+        className={cn(
+          "relative py-0.5 text-muted-foreground",
+          // Bullet centered on the parent ThinkingRun rail at every state.
+          // - left:-[18.5px] = -(pl-4=16px) - half the 6px dot + half the
+          //   1px rail, so the rail bisects the dot exactly.
+          // - top:0.55em anchors the dot to the first line via em units, so
+          //   it stays glued whether streaming (taller line w/ caret) or done.
+          "before:pointer-events-none before:absolute before:left-[-18.5px] before:top-[0.55em] before:size-1.5 before:rounded-full before:content-['']",
+          isStreaming ? "before:bg-primary" : "before:bg-muted-foreground/60",
+        )}
+      >
         <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/85">
           {text}
           {isStreaming && (
@@ -997,7 +1152,34 @@ function StreamingTextCodeBlock({
 const STREAMING_MARKDOWN_COMPONENTS = { code: StreamingTextCodeBlock } as const;
 const STREAMING_REMARK_PLUGINS = [remarkGfm];
 
+// FrozenMarkdown — already-closed paragraphs that will never re-render unless
+// the upstream `text` prop literally changes. Memo equality short-circuits the
+// expensive remark/markdown parse for everything before the live tail.
+const FrozenMarkdown = memo(function FrozenMarkdown({ text }: { text: string }) {
+  return (
+    <Markdown remarkPlugins={STREAMING_REMARK_PLUGINS} components={STREAMING_MARKDOWN_COMPONENTS}>
+      {text}
+    </Markdown>
+  );
+});
+
 const StreamingText = memo(function StreamingText({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  // VS Code-style progressive markdown: split text on the LAST paragraph
+  // boundary while streaming. Everything before is "frozen" — renders once and
+  // stays. Only the trailing partial paragraph re-parses on each token, which
+  // is the perf trick that keeps long responses fluid.
+  const { frozen, live } = useMemo(() => {
+    if (!text) return { frozen: "", live: "" };
+    if (!isStreaming) return { frozen: text, live: "" };
+    // Find the last paragraph break that ISN'T inside an open code fence.
+    const fenceCount = (text.match(/^```/gm) ?? []).length;
+    const insideFence = fenceCount % 2 === 1;
+    if (insideFence) return { frozen: "", live: text };
+    const lastBreak = text.lastIndexOf("\n\n");
+    if (lastBreak === -1) return { frozen: "", live: text };
+    return { frozen: text.slice(0, lastBreak + 2), live: text.slice(lastBreak + 2) };
+  }, [text, isStreaming]);
+
   if (!text) return null;
 
   return (
@@ -1010,9 +1192,12 @@ const StreamingText = memo(function StreamingText({ text, isStreaming }: { text:
         "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
       )}
     >
-      <Markdown remarkPlugins={STREAMING_REMARK_PLUGINS} components={STREAMING_MARKDOWN_COMPONENTS}>
-        {text}
-      </Markdown>
+      {frozen && <FrozenMarkdown text={frozen} />}
+      {live && (
+        <Markdown remarkPlugins={STREAMING_REMARK_PLUGINS} components={STREAMING_MARKDOWN_COMPONENTS}>
+          {live}
+        </Markdown>
+      )}
       {isStreaming && (
         <span className="ml-0.5 inline-block h-4 w-0.5 animate-(--animate-blink) align-text-bottom bg-foreground" />
       )}
@@ -1083,8 +1268,16 @@ function StreamingAssistantMessage({
   // pulse, so we hide this to avoid duplicate "Working…" indicators.
   const showWorking = isStreamingThis && segments.length === 0;
 
+  // Working set: every tool call (edit + read) flattened so the header can
+  // surface "Edited n files" / file pills.
+  const allToolEvents = useMemo(
+    () => segments.flatMap((s) => (s.kind === "tools" ? s.tools : [])),
+    [segments],
+  );
+
   return (
     <div className="group/msg py-2.5" data-chat-streaming={isStreamingThis ? "true" : undefined}>
+      <WorkingSetHeader events={allToolEvents} />
       {showWorking && (
         <div className="mb-2 flex items-center gap-2 text-[12px] text-muted-foreground">
           <span className="animated-ellipsis shimmer-text">
