@@ -712,19 +712,19 @@ function ReasoningBlock({
 
   if (embedded) {
     return (
-      <div
-        className={cn(
-          "relative py-0.5 text-muted-foreground",
-          // Bullet centered on the parent ThinkingRun rail at every state.
-          // - left:-[18.5px] = -(pl-4=16px) - half the 6px dot + half the
-          //   1px rail, so the rail bisects the dot exactly.
-          // - top:0.55em anchors the dot to the first line via em units, so
-          //   it stays glued whether streaming (taller line w/ caret) or done.
-          "before:pointer-events-none before:absolute before:left-[-18.5px] before:top-[0.55em] before:size-1.5 before:rounded-full before:content-['']",
-          isStreaming ? "before:bg-primary" : "before:bg-muted-foreground/60",
-        )}
-      >
+      <div className="py-0.5 text-muted-foreground">
         <p className="whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-muted-foreground/85">
+          {/* Bullet centered on the parent ThinkingRun rail.
+             Parent: border-l(1px) + pl-4(16px). In content-relative coords
+             the rail center is at x = -(16 + 0.5) = -16.5px.
+             For a 6px dot to be centered there: ml = -16.5 - 3 = -19.5px. */}
+          <span
+            className={cn(
+              "mr-2 ml-[-19.5px] inline-block size-1.5 rounded-full align-middle",
+              isStreaming ? "bg-primary" : "bg-muted-foreground/60",
+            )}
+            aria-hidden="true"
+          />
           {text}
           {isStreaming && (
             <span className="ml-0.5 inline-block h-3 w-0.5 translate-y-0.5 rounded-sm bg-muted-foreground/60 align-middle animate-(--animate-blink)" />
