@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -965,29 +965,40 @@ function buildSegments(parts: StreamPart[]): RenderSegment[] {
 }
 
 // ---------------------------------------------------------------------------
-// StreamingText — markdown with react-markdown, code highlighting, live cursor
 // ---------------------------------------------------------------------------
-function StreamingText({ text, isStreaming }: { text: string; isStreaming: boolean }) {
-  if (!text) return null;
-
-  function CodeBlock({
-    children,
-    className,
-  }: {
-    children?: React.ReactNode;
-    className?: string;
-  }) {
-    const isInline = !className;
-    if (isInline) {
-      return (
-        <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground">
-          {children}
-        </code>
-      );
-    }
-    const lang = className?.replace("language-", "") ?? "";
-    return <CodeBlockFenced code={String(children ?? "").replace(/\n$/, "")} lang={lang} />;
+// StreamingText — markdown with react-markdown, code highlighting, live cursor
+//
+// PERF NOTES:
+//   1. CodeBlock is hoisted out of the component body. Defining it inline
+//      causes React to treat every <code> in the markdown output as a NEW
+//      component on every render — remounting the syntax highlighter on every
+//      streaming token. Hoisting fixes the remount cascade.
+//   2. StreamingText is wrapped in React.memo so finalized text segments stop
+//      re-rendering once their props stabilize. Only the live tail re-parses.
+// ---------------------------------------------------------------------------
+function StreamingTextCodeBlock({
+  children,
+  className,
+}: {
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  const isInline = !className;
+  if (isInline) {
+    return (
+      <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground">
+        {children}
+      </code>
+    );
   }
+  const lang = className?.replace("language-", "") ?? "";
+  return <CodeBlockFenced code={String(children ?? "").replace(/\n$/, "")} lang={lang} />;
+}
+const STREAMING_MARKDOWN_COMPONENTS = { code: StreamingTextCodeBlock } as const;
+const STREAMING_REMARK_PLUGINS = [remarkGfm];
+
+const StreamingText = memo(function StreamingText({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  if (!text) return null;
 
   return (
     <div
@@ -999,7 +1010,7 @@ function StreamingText({ text, isStreaming }: { text: string; isStreaming: boole
         "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
       )}
     >
-      <Markdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+      <Markdown remarkPlugins={STREAMING_REMARK_PLUGINS} components={STREAMING_MARKDOWN_COMPONENTS}>
         {text}
       </Markdown>
       {isStreaming && (
@@ -1007,7 +1018,7 @@ function StreamingText({ text, isStreaming }: { text: string; isStreaming: boole
       )}
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // UserMessage - transcript-style prompt row.
@@ -1076,7 +1087,6 @@ function StreamingAssistantMessage({
     <div className="group/msg py-2.5" data-chat-streaming={isStreamingThis ? "true" : undefined}>
       {showWorking && (
         <div className="mb-2 flex items-center gap-2 text-[12px] text-muted-foreground">
-          <Loader2 className="size-3 animate-spin" />
           <span className="animated-ellipsis shimmer-text">
             {activeToolNames.length > 0 ? activeToolNames[0] : "Working"}
           </span>

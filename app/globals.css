@@ -138,8 +138,10 @@
   --success: oklch(0.6 0.18 145);
   --success-light: oklch(0.92 0.05 145);
 
-  /* Brand-tinted band that sweeps across muted streaming text. */
-  --thinking-shimmer: oklch(0.55 0.15 195);
+  /* Shimmer band color — matches VS Code's chat.thinkingShimmer (#000 light).
+     The band is overlaid on muted-foreground text via background-clip:text;
+     it MUST be high-contrast vs the text base or the sweep is invisible. */
+  --thinking-shimmer: oklch(0.205 0.015 247);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -196,8 +198,8 @@
   --success: oklch(0.65 0.18 145);
   --success-light: oklch(0.25 0.05 145);
 
-  /* Brand-tinted band that sweeps across muted streaming text. */
-  --thinking-shimmer: oklch(0.78 0.15 195);
+  /* Shimmer band color — matches VS Code's chat.thinkingShimmer (#fff dark). */
+  --thinking-shimmer: oklch(0.985 0 0);
 }
 
 @layer base {
@@ -334,7 +336,10 @@
 
 /* A3 — reserve vertical space on the streaming assistant message so the
    page does not jump as text streams in. Mirrors VS Code’s
-   .chat-most-recent-response { min-height } trick. */
+   .chat-most-recent-response { min-height } trick. We also turn on layout
+   containment so layout work is bounded to this subtree (avoids reflowing
+   the whole conversation on every token). */
 [data-chat-streaming="true"] {
-  min-height: var(--chat-streaming-min-h, 64px);
+  min-height: var(--chat-streaming-min-h, 240px);
+  contain: layout style;
 }

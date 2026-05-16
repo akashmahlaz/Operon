@@ -12,7 +12,6 @@ import {
   GitPullRequest,
   Globe,
   Image as ImageIcon,
-  Loader2,
   MessageSquareText,
   Mic,
   PencilLine,
@@ -248,16 +247,11 @@ function ToolIcon({
   state: ToolCallPart["state"];
   className?: string;
 }) {
-  const pending = isActiveToolState(state);
   const error = state === "error" || state === "output-error";
 
-  if (pending) {
-    return (
-      <Loader2
-        className={cn("size-3.5 animate-spin text-muted-foreground/70", className)}
-      />
-    );
-  }
+  // VS Code pattern: no spinner for active tools — the label shimmers instead
+  // (handled by ToolCallItem). Render the static icon for every state so the
+  // row's left position never shifts on state transitions.
   if (error) {
     return <AlertCircle className={cn("size-3.5 text-destructive", className)} />;
   }
@@ -328,7 +322,13 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className={cn("truncate", error && "text-destructive")}>
+            <span
+              className={cn(
+                "truncate",
+                error && "text-destructive",
+                isPending && !error && "shimmer-text animated-ellipsis",
+              )}
+            >
               {label}
             </span>
             {targetShort && (
