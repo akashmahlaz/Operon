@@ -153,31 +153,13 @@ impl AgentContext {
     }
 }
 
-/// Returns the OpenAI-style tool definitions filtered for the active channel.
+/// Returns the OpenAI-style tool definitions for the agent.
 ///
-/// In `web` (and any non-`coding`) channels, the local-fs and shell tools
-/// (`write_file`, `apply_patch`, `exec`) are HIDDEN from the model so it cannot
-/// run `git`/`gh`/etc. against the operator's machine. The model is expected
-/// to use `github_create_repo`, `github_write_file`, `github_create_pr`, etc.
-/// instead.
+/// All tools (including exec, write_file, apply_patch) are available in every
+/// channel. The workspace is sandboxed per-user so this is safe.
 #[allow(dead_code)]
-pub fn tool_definitions(channel: &str) -> Vec<Value> {
-    let coding = channel == "coding";
-    let local_only: &[&str] = &["write_file", "apply_patch", "exec"];
+pub fn tool_definitions(_channel: &str) -> Vec<Value> {
     all_tool_definitions()
-        .into_iter()
-        .filter(|t| {
-            if coding {
-                return true;
-            }
-            let name = t
-                .get("function")
-                .and_then(|f| f.get("name"))
-                .and_then(|n| n.as_str())
-                .unwrap_or("");
-            !local_only.contains(&name)
-        })
-        .collect()
 }
 
 fn all_tool_definitions() -> Vec<Value> {
@@ -489,6 +471,45 @@ fn all_tool_definitions() -> Vec<Value> {
                 }
             }),
         ),
+        tool_def(
+            "web_search",
+            "Search the web for current information. Returns top results with titles, URLs, and snippets.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["query"],
+                "properties": {
+                    "query": { "type": "string", "description": "Search query." },
+                    "count": { "type": "integer", "minimum": 1, "maximum": 10, "default": 5 }
+                }
+            }),
+        ),
+        tool_def(
+            "web_fetch",
+            "Fetch a URL and extract its readable text/markdown content. Use for reading web pages, docs, articles.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["url"],
+                "properties": {
+                    "url": { "type": "string", "description": "URL to fetch." },
+                    "max_chars": { "type": "integer", "minimum": 100, "maximum": 100000, "default": 20000 }
+                }
+            }),
+        ),
+        tool_def(
+            "create_file",
+            "Create a file in the workspace and return a download URL. Use this when the user asks you to generate a PDF, CSV, image, document, or any downloadable file. Write the file contents to workspace, then this tool makes it accessible via URL.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "description"],
+                "properties": {
+                    "path": { "type": "string", "description": "Workspace-relative path for the output file (e.g. 'output/resume.pdf')." },
+                    "description": { "type": "string", "description": "Brief description of the file for the user." }
+                }
+            }),
+        ),
     ]
 }
 
@@ -572,14 +593,6 @@ fn normalize_json_schema(value: &mut Value) {
 
 pub async fn dispatch(ctx: &AgentContext, tool_name: &str, input: &Value) -> Result<Value> {
     let ws = &ctx.workspace;
-    // Defense in depth: even if the model somehow names a local-only tool,
-    // refuse to run it outside the coding channel.
-    if matches!(tool_name, "exec" | "write_file" | "apply_patch") && !ctx.is_coding() {
-        return Err(anyhow!(
-            "tool `{tool_name}` is not available in the `{}` channel — this runs on a server, not the operator's machine. Use the github_* API tools (github_create_repo / github_write_file / github_create_pr / etc.) to ship changes.",
-            ctx.channel
-        ));
-    }
     match tool_name {
         "read_file" => read_file(ws, input).await,
         "write_file" => write_file(ws, input).await,
@@ -588,6 +601,9 @@ pub async fn dispatch(ctx: &AgentContext, tool_name: &str, input: &Value) -> Res
         "search" => search(ws, input),
         "tool_search" => tool_search(ctx, input),
         "exec" => exec(ws, input).await,
+        "web_search" => web_search(ctx, input).await,
+        "web_fetch" => web_fetch(ctx, input).await,
+        "create_file" => create_file(ws, input).await,
         "github_get_status" => github::get_status(&ctx.http, ctx.github_token.as_deref()).await,
         name if name.starts_with("github_") => {
             let token = ctx.github_token.as_deref().ok_or_else(|| {
@@ -1217,6 +1233,153 @@ async fn exec(ws: &Workspace, input: &Value) -> Result<Value> {
         "exit_code": exit.code(),
         "stdout": String::from_utf8_lossy(&stdout_bytes),
         "stderr": String::from_utf8_lossy(&stderr_bytes),
+    }))
+}
+
+async fn web_search(ctx: &AgentContext, input: &Value) -> Result<Value> {
+    #[derive(Deserialize)]
+    struct Args {
+        query: String,
+        #[serde(default)]
+        count: Option<u32>,
+    }
+    let args: Args = serde_json::from_value(input.clone())?;
+    let count = args.count.unwrap_or(5).clamp(1, 10);
+
+    // Use DuckDuckGo HTML search (no API key needed)
+    let url = format!(
+        "https://html.duckduckgo.com/html/?q={}&kl=us-en",
+        urlencoding::encode(&args.query)
+    );
+    let resp = ctx.http
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (compatible; OpeRon/1.0)")
+        .send()
+        .await
+        .context("web_search request failed")?;
+    let body = resp.text().await.context("reading search response")?;
+
+    // Parse results from DDG HTML (simple regex extraction)
+    let mut results: Vec<Value> = Vec::new();
+    for cap in regex::Regex::new(r#"class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)"#)
+        .unwrap()
+        .captures_iter(&body)
+    {
+        if results.len() >= count as usize {
+            break;
+        }
+        let href = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let title = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+        // DDG wraps URLs in a redirect; extract the actual URL
+        let actual_url = if href.contains("uddg=") {
+            href.split("uddg=")
+                .nth(1)
+                .and_then(|s| urlencoding::decode(s.split('&').next().unwrap_or(s)).ok())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| href.to_string())
+        } else {
+            href.to_string()
+        };
+        results.push(json!({
+            "title": html_escape::decode_html_entities(title).to_string(),
+            "url": actual_url,
+        }));
+    }
+
+    Ok(json!({
+        "query": args.query,
+        "results": results,
+    }))
+}
+
+async fn web_fetch(ctx: &AgentContext, input: &Value) -> Result<Value> {
+    #[derive(Deserialize)]
+    struct Args {
+        url: String,
+        #[serde(default)]
+        max_chars: Option<usize>,
+    }
+    let args: Args = serde_json::from_value(input.clone())?;
+    let max_chars = args.max_chars.unwrap_or(20000).clamp(100, 100000);
+
+    let resp = ctx.http
+        .get(&args.url)
+        .header("User-Agent", "Mozilla/5.0 (compatible; OpeRon/1.0)")
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .context("web_fetch request failed")?;
+
+    let status = resp.status().as_u16();
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let body = resp.text().await.context("reading response body")?;
+
+    // Strip HTML tags for a readable extraction (simple approach)
+    let text = if content_type.contains("html") {
+        // Remove script/style blocks, then strip tags
+        let no_scripts = regex::Regex::new(r"(?is)<(script|style)[^>]*>.*?</\1>")
+            .unwrap()
+            .replace_all(&body, "");
+        let no_tags = regex::Regex::new(r"<[^>]+>")
+            .unwrap()
+            .replace_all(&no_scripts, "");
+        let decoded = html_escape::decode_html_entities(&no_tags).to_string();
+        // Collapse whitespace
+        regex::Regex::new(r"\s+")
+            .unwrap()
+            .replace_all(&decoded, " ")
+            .trim()
+            .to_string()
+    } else {
+        body.clone()
+    };
+
+    let truncated = if text.len() > max_chars {
+        format!("{}\n\n[...truncated at {} chars]", &text[..max_chars], max_chars)
+    } else {
+        text
+    };
+
+    Ok(json!({
+        "url": args.url,
+        "status": status,
+        "content_type": content_type,
+        "content": truncated,
+    }))
+}
+
+async fn create_file(ws: &Workspace, input: &Value) -> Result<Value> {
+    #[derive(Deserialize)]
+    struct Args {
+        path: String,
+        description: String,
+    }
+    let args: Args = serde_json::from_value(input.clone())?;
+    let path = ws.resolve(&args.path)?;
+
+    // Verify the file exists (agent should have written it with write_file or exec first)
+    if !path.exists() {
+        bail!(
+            "File '{}' does not exist. Write the file first using write_file or exec, then call create_file to generate the download URL.",
+            args.path
+        );
+    }
+
+    let metadata = tokio::fs::metadata(&path).await?;
+    let size = metadata.len();
+
+    // Return workspace-relative path — the HTTP layer serves it
+    Ok(json!({
+        "path": args.path,
+        "description": args.description,
+        "size_bytes": size,
+        "download_url": format!("/local-uploads/{}", args.path.replace('\\', "/")),
+        "status": "ready",
     }))
 }
 

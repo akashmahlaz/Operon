@@ -47,6 +47,7 @@ const TOOL_ICONS: Record<string, typeof FileText> = {
 
   tavily_search: Globe,
   web_search: Globe,
+  web_fetch: Globe,
   web_request: Globe,
 
   memory_search: Sparkles,
@@ -55,6 +56,8 @@ const TOOL_ICONS: Record<string, typeof FileText> = {
 
   spawn_subagent: Workflow,
   discover_skills: Workflow,
+
+  create_file: FileText,
 
   generate_image: ImageIcon,
   generate_video: ImageIcon,
@@ -177,6 +180,14 @@ export function describeTool(
       return asString(a.url)
         ? `Fetched ${asString(a.url)}`
         : "Made web request";
+
+    case "web_fetch":
+      return asString(a.url)
+        ? `Fetched ${asString(a.url)}`
+        : "Fetched web page";
+
+    case "create_file":
+      return path ? `Created ${basename(path)}` : "Created file";
 
     case "memory_search":
       return query ? `Searched memory for ${quote(query)}` : "Searched memory";

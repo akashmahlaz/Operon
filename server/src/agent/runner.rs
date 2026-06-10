@@ -1500,6 +1500,9 @@ async fn auto_title_conversation(
 /// (`{"type":"text",...}` and `{"type":"image_url","image_url":{"url":...}}`).
 /// The Anthropic transformer in [`super::anthropic`] translates this
 /// shape into Anthropic's native image content blocks.
+///
+/// For non-image files (text, code, CSV, PDF, etc.), the file content is
+/// fetched and included inline so the model can actually work with it.
 fn build_initial_user_content(text: &str, attachments: &[AttachmentInput]) -> Value {
     if attachments.is_empty() {
         return Value::String(text.to_owned());
@@ -1516,19 +1519,52 @@ fn build_initial_user_content(text: &str, attachments: &[AttachmentInput]) -> Va
                 "image_url": { "url": att.url },
             }));
         } else {
-            // Non-image attachments: include as a text reference so the model
-            // at least knows about the file. Provider-native file/document
-            // blocks (Anthropic `document`, OpenAI Files API) are not wired
-            // up yet — that's a follow-up.
+            // Non-image attachments: include file content inline when possible.
+            // Try to fetch the content from the URL so the model can read it.
             let label = att.name.as_deref().unwrap_or("file");
-            parts.push(json!({
-                "type": "text",
-                "text": format!("[Attached file '{label}' ({mime}): {url}]",
-                    label = label, mime = mime, url = att.url),
-            }));
+            let content = fetch_file_content_sync(&att.url);
+            match content {
+                Some(text_content) if text_content.len() <= 200_000 => {
+                    parts.push(json!({
+                        "type": "text",
+                        "text": format!(
+                            "--- File: {label} ({mime}) ---\n{text_content}\n--- End of {label} ---"
+                        ),
+                    }));
+                }
+                _ => {
+                    // Fallback: just mention the file
+                    parts.push(json!({
+                        "type": "text",
+                        "text": format!("[Attached file '{label}' ({mime}): {url}]",
+                            label = label, mime = mime, url = att.url),
+                    }));
+                }
+            }
         }
     }
     Value::Array(parts)
+}
+
+/// Attempt to read file content from a URL (blocking, best-effort).
+/// Used to inline text file contents into the LLM context.
+fn fetch_file_content_sync(url: &str) -> Option<String> {
+    // For local uploads, read directly from disk
+    if url.contains("/local-uploads/") {
+        let filename = url.rsplit('/').next()?;
+        let path = std::path::Path::new("./local_uploads").join(filename);
+        return std::fs::read_to_string(&path).ok();
+    }
+    // For remote URLs, use a quick blocking fetch
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .ok()?;
+    let resp = client.get(url).send().ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.text().ok()
 }
 
 /// Simple heuristic title generation from user prompt (no LLM call needed).
