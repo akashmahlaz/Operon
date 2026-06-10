@@ -568,27 +568,6 @@ function ChatPage() {
     }
   }
 
-  async function createConversation(): Promise<string | null> {
-    try {
-      const res = await operonFetch("/agent/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New Chat", channel: activeChannel }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setConversationId(data._id);
-        setActiveChannel("web");
-        router.replace(`/dashboard/chat?id=${data._id}`);
-        loadConversations();
-        return data._id;
-      }
-    } catch {
-      /* ignore */
-    }
-    return null;
-  }
-
   async function deleteConversation(id: string, e: React.MouseEvent) {
     e.stopPropagation();
     try {
@@ -741,7 +720,8 @@ function ChatPage() {
 
   const handleSend = useCallback(
     async (overrideContent?: string) => {
-      if (isLoading) return;
+      // If a response is streaming, this send becomes a steer message. The
+      // stream hook cancels/freeze/restarts; do not block here.
       // Guard: don't send while files are still uploading
       const stillUploading = attachedFiles.some((f) => f.uploading);
       if (stillUploading) {
@@ -821,7 +801,21 @@ function ChatPage() {
 
       try {
         let activeConvId = conversationId;
-        if (!activeConvId) activeConvId = await createConversation();
+        if (!activeConvId) {
+          const res = await operonFetch("/agent/conversations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "New Chat", channel: activeChannel }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            activeConvId = data._id;
+            setConversationId(data._id);
+            setActiveChannel("web");
+            router.replace(`/dashboard/chat?id=${data._id}`);
+            loadConversations();
+          }
+        }
         convIdRef.current = activeConvId;
 
         // Build options object matching useStreamEvents signature
@@ -842,13 +836,14 @@ function ChatPage() {
     },
     [
       input,
-      isLoading,
       conversationId,
       attachedFiles,
       sendMessage,
       selectedModel,
       reasoningLevel,
       activeChannel,
+      router,
+      setChatMessages,
     ],
   );
 

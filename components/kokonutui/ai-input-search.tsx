@@ -1,7 +1,15 @@
 ﻿"use client";
 
 import { ProviderIcon as LobeProviderIcon } from "@lobehub/icons";
-import { ArrowUp, Bot, BrainCircuit, Check, ChevronDown, Paperclip, Square } from "lucide-react";
+import {
+  ArrowUp,
+  Bot,
+  BrainCircuit,
+  Check,
+  ChevronDown,
+  Paperclip,
+  Square,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -12,7 +20,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAutoResizeTextarea } from "@/hooks/use-auto-resize-textarea";
 import { cn } from "@/lib/utils";
 
@@ -58,7 +70,8 @@ function extractProvider(modelValue: string, providerLabel?: string): string {
   }
   if (providerLabel) return providerLabel.toLowerCase().replace(/\s+/g, "");
   const lower = modelValue.toLowerCase();
-  if (lower.includes("claude") || lower.includes("anthropic")) return "anthropic";
+  if (lower.includes("claude") || lower.includes("anthropic"))
+    return "anthropic";
   if (lower.includes("gpt") || lower.includes("openai")) return "openai";
   if (lower.includes("gemini")) return "google";
   if (lower.includes("mistral")) return "mistral";
@@ -67,7 +80,15 @@ function extractProvider(modelValue: string, providerLabel?: string): string {
   return "";
 }
 
-function ModelProviderIcon({ modelValue, providerLabel, size = 16 }: { modelValue: string; providerLabel?: string; size?: number }) {
+function ModelProviderIcon({
+  modelValue,
+  providerLabel,
+  size = 16,
+}: {
+  modelValue: string;
+  providerLabel?: string;
+  size?: number;
+}) {
   const provider = extractProvider(modelValue, providerLabel);
   if (!provider) return <Bot className="size-4 text-muted-foreground" />;
   return (
@@ -106,8 +127,11 @@ export default function AI_Input_Search({
   const selectedOption =
     models.length === 0
       ? ({ value: "", label: "No API models" } satisfies PromptModelOption)
-      : models.find((m) => m.value === selectedModel) ??
-        ({ value: selectedModel, label: compactModelLabel(selectedModel) } satisfies PromptModelOption);
+      : (models.find((m) => m.value === selectedModel) ??
+        ({
+          value: selectedModel,
+          label: compactModelLabel(selectedModel),
+        } satisfies PromptModelOption));
 
   useEffect(() => {
     adjustHeight(value.length === 0);
@@ -115,7 +139,9 @@ export default function AI_Input_Search({
 
   function submit() {
     const trimmed = value.trim();
-    if (!trimmed || disabled || isLoading) return;
+    // While loading, Enter/Send acts as a steer message. Only hard-disable
+    // for route/channel disabled states, not for generation-in-progress.
+    if (!trimmed || disabled) return;
     onSubmit(trimmed);
   }
 
@@ -132,7 +158,7 @@ export default function AI_Input_Search({
         ref={textareaRef}
         id="operon-ai-prompt"
         value={value}
-        disabled={disabled || isLoading}
+        disabled={disabled}
         placeholder={placeholder}
         rows={1}
         className="min-h-22 w-full resize-none rounded-none border-0 bg-transparent px-4 pt-4 pb-1 text-[15px] leading-relaxed text-foreground placeholder:text-muted-foreground/70 shadow-none focus-visible:ring-0 disabled:cursor-not-allowed"
@@ -189,14 +215,24 @@ export default function AI_Input_Search({
                     exit={{ opacity: 0, y: 4 }}
                     transition={{ duration: 0.12 }}
                   >
-                    <ModelProviderIcon modelValue={selectedOption.value} providerLabel={selectedOption.providerLabel} size={14} />
-                    <span className="max-w-36 truncate">{selectedOption.label}</span>
+                    <ModelProviderIcon
+                      modelValue={selectedOption.value}
+                      providerLabel={selectedOption.providerLabel}
+                      size={14}
+                    />
+                    <span className="max-w-36 truncate">
+                      {selectedOption.label}
+                    </span>
                     <ChevronDown className="size-3 shrink-0 opacity-50" />
                   </motion.span>
                 </AnimatePresence>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" side="top" className="max-h-80 min-w-72 overflow-y-auto rounded-xl p-1.5">
+            <DropdownMenuContent
+              align="start"
+              side="top"
+              className="max-h-80 min-w-72 overflow-y-auto rounded-xl p-1.5"
+            >
               {models.map((model) => (
                 <DropdownMenuItem
                   key={model.value}
@@ -205,16 +241,26 @@ export default function AI_Input_Search({
                 >
                   <div className="flex min-w-0 items-center gap-2.5">
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background shadow-xs">
-                      <ModelProviderIcon modelValue={model.value} providerLabel={model.providerLabel} size={16} />
+                      <ModelProviderIcon
+                        modelValue={model.value}
+                        providerLabel={model.providerLabel}
+                        size={16}
+                      />
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{model.label}</p>
+                      <p className="truncate text-sm font-medium">
+                        {model.label}
+                      </p>
                       {model.providerLabel && (
-                        <p className="truncate text-[11px] text-muted-foreground">{model.providerLabel}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {model.providerLabel}
+                        </p>
                       )}
                     </div>
                   </div>
-                  {selectedModel === model.value && <Check className="size-3.5 shrink-0 text-primary" />}
+                  {selectedModel === model.value && (
+                    <Check className="size-3.5 shrink-0 text-primary" />
+                  )}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -252,53 +298,69 @@ export default function AI_Input_Search({
                 </TooltipContent>
               )}
             </Tooltip>
-            <DropdownMenuContent align="start" side="top" className="min-w-40 rounded-xl p-1.5">
-              {(["auto", "low", "medium", "high"] as ReasoningLevel[]).map((lvl) => (
-                <DropdownMenuItem
-                  key={lvl}
-                  className="flex items-center justify-between gap-2 rounded-lg"
-                  onSelect={() => onReasoningLevelChange(lvl)}
-                >
-                  <span>{reasoningLabels[lvl]}</span>
-                  {reasoningLevel === lvl && <Check className="size-3.5 text-primary" />}
-                </DropdownMenuItem>
-              ))}
+            <DropdownMenuContent
+              align="start"
+              side="top"
+              className="min-w-40 rounded-xl p-1.5"
+            >
+              {(["auto", "low", "medium", "high"] as ReasoningLevel[]).map(
+                (lvl) => (
+                  <DropdownMenuItem
+                    key={lvl}
+                    className="flex items-center justify-between gap-2 rounded-lg"
+                    onSelect={() => onReasoningLevelChange(lvl)}
+                  >
+                    <span>{reasoningLabels[lvl]}</span>
+                    {reasoningLevel === lvl && (
+                      <Check className="size-3.5 text-primary" />
+                    )}
+                  </DropdownMenuItem>
+                ),
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
-        {isLoading ? (
+        <div className="flex items-center gap-1.5">
+          {isLoading && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  aria-label="Stop generating"
+                  onClick={onStop}
+                  className="size-8 shrink-0 rounded-full border-border/60"
+                >
+                  <Square className="size-3.5 fill-current" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Stop</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                type="button"
+                type="submit"
                 size="icon"
-                variant="outline"
-                aria-label="Stop generating"
-                onClick={onStop}
-                className="size-8 shrink-0 rounded-full border-border/60"
+                aria-label={isLoading ? "Steer response" : "Send message"}
+                disabled={disabled || !value.trim()}
+                className={cn(
+                  "size-8 shrink-0 rounded-full transition-all",
+                  value.trim() && !disabled
+                    ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+                    : "cursor-not-allowed bg-muted text-muted-foreground/40",
+                )}
               >
-                <Square className="size-3.5 fill-current" />
+                <ArrowUp className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">Stop</TooltipContent>
+            <TooltipContent side="top">
+              {isLoading ? "Steer response" : "Send"}
+            </TooltipContent>
           </Tooltip>
-        ) : (
-          <Button
-            type="submit"
-            size="icon"
-            aria-label="Send message"
-            disabled={disabled || !value.trim()}
-            className={cn(
-              "size-8 shrink-0 rounded-full transition-all",
-              value.trim() && !disabled
-                ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
-                : "cursor-not-allowed bg-muted text-muted-foreground/40",
-            )}
-          >
-            <ArrowUp className="size-4" />
-          </Button>
-        )}
+        </div>
       </div>
     </form>
   );

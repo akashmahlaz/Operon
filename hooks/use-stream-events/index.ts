@@ -182,6 +182,8 @@ export function useStreamEvents({
   const abortRef = useRef<AbortController | null>(null);
   // Guard against double-start
   const streamingRef = useRef(false);
+  // Monotonic request id so stale aborted streams cannot mutate current state.
+  const requestSeqRef = useRef(0);
   // Typewriter buffer for smooth text rendering (especially for Anthropic's large chunks)
   const typewriterRef = useRef<TypewriterBuffer | null>(null);
 
@@ -775,6 +777,7 @@ export function useStreamEvents({
       // Cancel any in-flight request (for non-steer, this is a no-op since already cancelled above)
       abortRef.current?.abort();
       abortRef.current = new AbortController();
+      const requestSeq = ++requestSeqRef.current;
 
       // Reset state for new message
       streamingRef.current = true;
@@ -813,9 +816,17 @@ export function useStreamEvents({
       // between the steer user message and the new assistant placeholder
       setMessages((prev) => {
         if (isSteer && steerFrozenAssistant) {
-          // Freeze old partial + steer message + new placeholder
-          const frozen = { ...steerFrozenAssistant };
-          return [...prev, frozen, userMsg, assistantMessageRef.current!];
+          // Update the existing partial assistant in-place, then append the
+          // steering user message and a fresh assistant placeholder.
+          const frozen = {
+            ...steerFrozenAssistant,
+            orderedParts: [...steerFrozenAssistant.orderedParts],
+          };
+          return [
+            ...upsertAssistantMessage(prev, frozen),
+            userMsg,
+            assistantMessageRef.current!,
+          ];
         }
         return [...prev, userMsg, assistantMessageRef.current!];
       });
@@ -951,6 +962,8 @@ export function useStreamEvents({
           setStatus("error");
         }
       } finally {
+        // Ignore cleanup from a stale aborted stream after a steer/new request.
+        if (requestSeq !== requestSeqRef.current) return;
         // Flush and destroy typewriter buffer
         typewriterRef.current?.flush();
         typewriterRef.current?.destroy();
