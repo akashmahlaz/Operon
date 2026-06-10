@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  useDeferredValue,
+  Suspense,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -399,8 +407,13 @@ function ChatPage() {
     return () => el.removeEventListener("scroll", handler);
   }, [checkIfNearBottom]);
 
+  const scrollThrottleRef = useRef(0);
   useEffect(() => {
-    if (isNearBottom) scrollToBottom(true);
+    if (!isNearBottom) return;
+    const now = Date.now();
+    if (now - scrollThrottleRef.current < 100) return;
+    scrollThrottleRef.current = now;
+    requestAnimationFrame(() => scrollToBottom(true));
   }, [messages, isNearBottom, scrollToBottom]);
 
   // Load conversations + channel status
@@ -840,12 +853,13 @@ function ChatPage() {
   );
 
   const isChannelConversation = activeChannel !== "web";
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
-  const filteredConversations = searchQuery
+  const filteredConversations = deferredSearchQuery
     ? conversations.filter(
         (c) =>
-          c.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          c.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
+          c.title?.toLowerCase().includes(deferredSearchQuery.toLowerCase()) ||
+          c.lastMessage?.toLowerCase().includes(deferredSearchQuery.toLowerCase()),
       )
     : conversations;
 
@@ -1870,7 +1884,7 @@ function ConversationStatusBar({
   const [compactPreview, setCompactPreview] = useState<string>("");
 
   // Find the most recent usage event across all messages.
-  const usage = (() => {
+  const usage = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       for (let j = m.orderedParts.length - 1; j >= 0; j--) {
@@ -1884,17 +1898,20 @@ function ConversationStatusBar({
       }
     }
     return null;
-  })();
+  }, [messages]);
 
   // Step counter: total tool calls across the whole conversation.
-  let stepCount = 0;
-  for (const m of messages) {
-    for (const p of m.orderedParts) {
-      const t = (p as { type?: string }).type;
-      if (t === "tool-call-start" || t === "tool-call-input-available")
-        stepCount++;
+  const stepCount = useMemo(() => {
+    let count = 0;
+    for (const m of messages) {
+      for (const p of m.orderedParts) {
+        const t = (p as { type?: string }).type;
+        if (t === "tool-call-start" || t === "tool-call-input-available")
+          count++;
+      }
     }
-  }
+    return count;
+  }, [messages]);
 
   const totalMsgs = messages.length;
   // Heuristic compaction trigger: > 30 messages OR > ~80% of a 128k window.

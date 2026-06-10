@@ -18,7 +18,6 @@ use similar::TextDiff;
 use tokio::{io::AsyncReadExt, process::Command, time::timeout};
 
 use super::github;
-use super::next_bridge::{NextBridge, NextToolDescriptor};
 
 const MAX_FILE_BYTES: usize = 1_000_000;
 const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 300;
@@ -86,14 +85,6 @@ pub struct AgentContext {
     /// Local-fs / shell tools (`exec`, `write_file`, `apply_patch`) are only
     /// dispatched in `coding`. Web mode must use the GitHub API tools instead.
     pub channel: String,
-    /// Optional bridge to the Next.js connector catalog (Gmail, Vercel, Stripe,
-    /// Cloudflare, SEO, Meta Ads, memory, skills, MCP). When set, every tool
-    /// the operator has connected on the Next side is exposed to the model and
-    /// dispatched back to /api/tools/execute.
-    pub next_bridge: Option<NextBridge>,
-    /// Tool descriptors fetched from /api/tools at run start. Empty when the
-    /// bridge isn't configured.
-    pub next_tools: Vec<NextToolDescriptor>,
 }
 
 impl AgentContext {
@@ -102,16 +93,12 @@ impl AgentContext {
         http: Client,
         github_token: Option<String>,
         channel: String,
-        next_bridge: Option<NextBridge>,
-        next_tools: Vec<NextToolDescriptor>,
     ) -> Self {
         Self {
             workspace,
             http,
             github_token,
             channel,
-            next_bridge,
-            next_tools,
         }
     }
 
@@ -129,26 +116,9 @@ impl AgentContext {
 /// instead.
 #[allow(dead_code)]
 pub fn tool_definitions(channel: &str) -> Vec<Value> {
-    tool_definitions_with_next(channel, &[])
-}
-
-/// Returns the channel-filtered native tool defs PLUS any Next.js connector
-/// tools registered for this run via the [`NextBridge`].
-pub fn tool_definitions_with_next(channel: &str, next_tools: &[NextToolDescriptor]) -> Vec<Value> {
-    tool_definitions_for_loaded_next(channel, next_tools, None)
-}
-
-/// Returns native tools plus only the Next.js connector tools named in
-/// `loaded_next_tool_names`. This is the deferred-loading path used by the
-/// agent loop so large connector catalogs do not exceed provider tool limits.
-pub fn tool_definitions_for_loaded_next(
-    channel: &str,
-    next_tools: &[NextToolDescriptor],
-    loaded_next_tool_names: Option<&HashSet<String>>,
-) -> Vec<Value> {
     let coding = channel == "coding";
     let local_only: &[&str] = &["write_file", "apply_patch", "exec"];
-    let mut defs: Vec<Value> = all_tool_definitions()
+    all_tool_definitions()
         .into_iter()
         .filter(|t| {
             if coding {
@@ -161,52 +131,7 @@ pub fn tool_definitions_for_loaded_next(
                 .unwrap_or("");
             !local_only.contains(&name)
         })
-        .collect();
-    let native_names: std::collections::HashSet<String> = defs
-        .iter()
-        .filter_map(|t| {
-            t.get("function")
-                .and_then(|f| f.get("name"))
-                .and_then(|n| n.as_str())
-                .map(str::to_owned)
-        })
-        .collect();
-    for t in next_tools {
-        if let Some(loaded) = loaded_next_tool_names {
-            if !loaded.contains(&t.name) {
-                continue;
-            }
-        }
-        // Avoid colliding with native tools (e.g. github_*). Native wins.
-        if native_names.contains(&t.name) {
-            continue;
-        }
-        defs.push(next_tool_definition(t));
-    }
-    defs
-}
-
-pub fn native_tool_names(channel: &str) -> HashSet<String> {
-    tool_definitions_for_loaded_next(channel, &[], None)
-        .into_iter()
-        .filter_map(|tool| {
-            tool.get("function")
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
         .collect()
-}
-
-fn next_tool_definition(tool: &NextToolDescriptor) -> Value {
-    json!({
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": normalize_tool_parameters(tool.input_schema.clone()),
-        }
-    })
 }
 
 fn all_tool_definitions() -> Vec<Value> {
@@ -274,7 +199,7 @@ fn all_tool_definitions() -> Vec<Value> {
         ),
         tool_def(
             "tool_search",
-            "Search the deferred connector tool catalog by capability. Matching connector tools are automatically loaded for the next agent step. Use this when you need Gmail, Calendar, Vercel, WhatsApp, Telegram, memory, MCP, or other connector tools that are not currently available by exact name.",
+            "Search the native Rust tool catalog by capability. Use this when you need to discover the exact tool name or parameters.",
             json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -542,20 +467,21 @@ fn normalize_tool_parameters(parameters: Value) -> Value {
     schema
 }
 
-fn normalize_json_schema(schema: &mut Value) {
-    let Some(object) = schema.as_object_mut() else {
+fn normalize_json_schema(value: &mut Value) {
+    let Some(object) = value.as_object_mut() else {
         return;
     };
 
     let is_object = object
         .get("type")
         .and_then(Value::as_str)
-        .map(|value| value == "object")
-        .unwrap_or(false)
-        || object.contains_key("properties");
+        .is_some_and(|kind| kind == "object")
+        || object.contains_key("properties")
+        || object.contains_key("required");
 
     if is_object {
         object.insert("type".to_owned(), Value::String("object".to_owned()));
+
         if !object.get("properties").is_some_and(Value::is_object) {
             object.insert("properties".to_owned(), Value::Object(Map::new()));
         }
@@ -624,12 +550,6 @@ pub async fn dispatch(ctx: &AgentContext, tool_name: &str, input: &Value) -> Res
             dispatch_github(&ctx.http, token, name, input).await
         }
         other => {
-            // Try the Next.js connector bridge (Gmail, Vercel, Stripe, …).
-            if let Some(bridge) = &ctx.next_bridge {
-                if ctx.next_tools.iter().any(|t| t.name == other) {
-                    return bridge.execute(other, input).await;
-                }
-            }
             Err(anyhow!("unknown tool: {other}"))
         }
     }
@@ -650,32 +570,48 @@ fn tool_search(ctx: &AgentContext, input: &Value) -> Result<Value> {
     }
 
     let limit = args.limit.unwrap_or(8).clamp(1, 25);
-    let native_names = native_tool_names(&ctx.channel);
-    let mut matches: Vec<(i32, &NextToolDescriptor)> = ctx
-        .next_tools
-        .iter()
-        .filter(|tool| !native_names.contains(&tool.name))
-        .map(|tool| (search_score(&tool.name, &tool.description, query), tool))
-        .filter(|(score, _)| *score > 0)
+    let definitions = tool_definitions(&ctx.channel);
+    let mut matches: Vec<(i32, Value)> = definitions
+        .into_iter()
+        .filter_map(|tool| {
+            let function = tool.get("function")?;
+            let name = function.get("name").and_then(Value::as_str).unwrap_or("");
+            let description = function
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let score = search_score(name, description, query);
+            (score > 0).then_some((score, tool))
+        })
         .collect();
 
     matches.sort_by(|(left_score, left_tool), (right_score, right_tool)| {
+        let left_name = left_tool
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let right_name = right_tool
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
         right_score
             .cmp(left_score)
-            .then_with(|| left_tool.name.cmp(&right_tool.name))
+            .then_with(|| left_name.cmp(right_name))
     });
 
     let tools: Vec<Value> = matches
         .into_iter()
         .take(limit)
         .map(|(score, tool)| {
+            let function = tool.get("function").unwrap_or(&Value::Null);
             json!({
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.input_schema,
+                "name": function.get("name").cloned().unwrap_or(Value::Null),
+                "description": function.get("description").cloned().unwrap_or(Value::Null),
+                "input_schema": function.get("parameters").cloned().unwrap_or(Value::Null),
                 "score": score,
-                "source": "next",
-                "loaded_next_step": true,
+                "source": "rust",
             })
         })
         .collect();
@@ -683,7 +619,7 @@ fn tool_search(ctx: &AgentContext, input: &Value) -> Result<Value> {
     Ok(json!({
         "query": query,
         "tools": tools,
-        "instruction": "The returned tools are loaded for your next step. Call the exact tool name when needed. If nothing relevant was returned, refine the query with broader capability words."
+        "instruction": "Call the exact native Rust tool name when needed. If nothing relevant was returned, refine the query with broader capability words."
     }))
 }
 

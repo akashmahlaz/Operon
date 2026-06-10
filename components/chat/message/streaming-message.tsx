@@ -1687,7 +1687,8 @@ function StreamingAssistantMessage({
   const partsLen = message.orderedParts.length;
   const segments = useMemo(
     () => buildSegments(message.orderedParts),
-    [message.orderedParts, partsLen, isStreamingThis],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [partsLen, isStreamingThis],
   );
   const renderGroups = useMemo(() => groupThinkingRuns(segments), [segments]);
 
@@ -1916,38 +1917,52 @@ function MessageToolbar({
 // ---------------------------------------------------------------------------
 // ChatMessageRow — routes based on role
 // ---------------------------------------------------------------------------
-function ChatMessageRow({
-  message,
-  isLoading,
-  isOld,
-  onConfirm,
-  onRetryTool,
-  onRegenerate,
-}: {
-  message: StreamingMessage;
-  isLoading: boolean;
-  isOld?: boolean;
-  onConfirm?: (id: string, choice: string) => void;
-  onRetryTool?: (ev: ToolCallEvent) => void;
-  onRegenerate?: () => void;
-}) {
-  if (message.role === "user") {
-    const text = message.orderedParts
-      .filter((p) => p.type === "text-delta")
-      .map((p) => (p as TextDeltaEvent).text)
-      .join("");
-    return <UserMessage text={text} />;
-  }
-  return (
-    <StreamingAssistantMessage
-      message={message}
-      isLoading={isLoading}
-      onConfirm={onConfirm}
-      onRetryTool={onRetryTool}
-      onRegenerate={onRegenerate}
-    />
-  );
-}
+const ChatMessageRow = memo(
+  function ChatMessageRow({
+    message,
+    isLoading,
+    isOld,
+    onConfirm,
+    onRetryTool,
+    onRegenerate,
+  }: {
+    message: StreamingMessage;
+    isLoading: boolean;
+    isOld?: boolean;
+    onConfirm?: (id: string, choice: string) => void;
+    onRetryTool?: (ev: ToolCallEvent) => void;
+    onRegenerate?: () => void;
+  }) {
+    if (message.role === "user") {
+      const text = message.orderedParts
+        .filter((p) => p.type === "text-delta")
+        .map((p) => (p as TextDeltaEvent).text)
+        .join("");
+      return <UserMessage text={text} />;
+    }
+    return (
+      <StreamingAssistantMessage
+        message={message}
+        isLoading={isLoading}
+        onConfirm={onConfirm}
+        onRetryTool={onRetryTool}
+        onRegenerate={onRegenerate}
+      />
+    );
+  },
+  (prev, next) => {
+    // Skip re-render if parts haven't changed and streaming state is same
+    if (prev.message.id !== next.message.id) return false;
+    if (prev.message.orderedParts.length !== next.message.orderedParts.length)
+      return false;
+    if (prev.message.isComplete !== next.message.isComplete) return false;
+    if (prev.isLoading !== next.isLoading) return false;
+    if (prev.isOld !== next.isOld) return false;
+    // For the actively streaming message, always re-render
+    if (next.isLoading && !next.message.isComplete) return false;
+    return true;
+  },
+);
 
 // ---------------------------------------------------------------------------
 // ChatMessageList — the main exported list component

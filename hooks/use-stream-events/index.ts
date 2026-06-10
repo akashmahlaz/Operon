@@ -195,11 +195,25 @@ export function useStreamEvents({
           ...assistantMessageRef.current,
           orderedParts: [...assistantMessageRef.current.orderedParts],
         };
-        setMessages((prev) =>
-          upsertAssistantMessage(prev, message),
-        );
+        setMessages((prev) => upsertAssistantMessage(prev, message));
       }
     });
+  }
+
+  // --- Debug: log streaming throughput for diagnosing fast-provider drops ---
+  const _debugFrameCountRef = useRef(0);
+  const _debugLastLogRef = useRef(0);
+  function _debugLogThroughput(eventType: string) {
+    if (process.env.NODE_ENV !== "development") return;
+    _debugFrameCountRef.current++;
+    const now = Date.now();
+    if (now - _debugLastLogRef.current > 2000) {
+      console.debug(
+        `[stream-events] ${_debugFrameCountRef.current} events in last 2s | last: ${eventType} | parts: ${assistantMessageRef.current?.orderedParts.length ?? 0}`,
+      );
+      _debugFrameCountRef.current = 0;
+      _debugLastLogRef.current = now;
+    }
   }
 
   function upsertAssistantMessage(
@@ -315,19 +329,19 @@ export function useStreamEvents({
   // ---------------------------------------------------------------------------
   function appendReasoningDelta(text: string) {
     reasoningTextRef.current += text;
-    const part: ReasoningPartEvent = {
-      id: nextId(),
-      type: "reasoning-delta",
-      text: reasoningTextRef.current,
-    };
-    // If the last part is also reasoning-delta, replace it (update in place)
+    // If the last part is also reasoning-delta, update text in place (keep same id
+    // so React reconciliation stays stable and doesn't re-mount the component).
     const parts = assistantMessageRef.current?.orderedParts ?? [];
     const lastReasoning = parts[parts.length - 1];
     if (lastReasoning?.type === "reasoning-delta") {
-      Object.assign(lastReasoning, part);
+      (lastReasoning as ReasoningPartEvent).text = reasoningTextRef.current;
       scheduleFlush();
     } else {
-      appendPart(part);
+      appendPart({
+        id: nextId(),
+        type: "reasoning-delta",
+        text: reasoningTextRef.current,
+      } satisfies ReasoningPartEvent);
     }
   }
 
@@ -351,6 +365,17 @@ export function useStreamEvents({
   // Handle a single parsed SSE event
   // ---------------------------------------------------------------------------
   function handleEvent(ev: SSEEvent) {
+    _debugLogThroughput(ev.type ?? "unknown");
+    // Deep logging: log every SSE event in development for debugging
+    if (process.env.NODE_ENV === "development") {
+      console.debug(`[stream] ${ev.type}`, {
+        toolCallId: ev.data.toolCallId,
+        toolName: ev.data.toolName,
+        text: ev.data.text?.slice(0, 80),
+        status: ev.data.status,
+        errorText: ev.data.errorText,
+      });
+    }
     switch (ev.type) {
       case "reasoning-start":
         reasoningTextRef.current = "";
@@ -868,6 +893,24 @@ export function useStreamEvents({
           setStatus("error");
         }
       } finally {
+        // If we exit the stream loop but the assistant message is still
+        // in "streaming" state (no message-end received), mark it complete
+        // to prevent stuck loading UI.
+        if (
+          assistantMessageRef.current &&
+          !assistantMessageRef.current.isComplete
+        ) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn(
+              "[stream] Stream ended without message-end event — forcing completion",
+            );
+          }
+          assistantMessageRef.current.isComplete = true;
+          assistantMessageRef.current.isStreaming = false;
+          setMessages((prev) =>
+            upsertAssistantMessage(prev, assistantMessageRef.current!),
+          );
+        }
         streamingRef.current = false;
         setStatus((s) => (s === "streaming" ? "idle" : s));
       }

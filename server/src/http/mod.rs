@@ -6,6 +6,7 @@ mod conversations;
 mod error;
 mod health;
 mod integrations;
+mod logs;
 mod settings;
 mod uploads;
 
@@ -50,6 +51,7 @@ pub fn router(state: AppState) -> Router {
         .route("/integrations/github/status", get(integrations::github_status))
         .route("/integrations/whatsapp/onboarding", get(integrations::whatsapp_onboarding))
         .route("/integrations/whatsapp", post(integrations::whatsapp_action))
+        .route("/logs", get(logs::list_logs).post(logs::append_log))
         .route(
             "/uploads",
             post(uploads::create_upload)

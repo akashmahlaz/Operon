@@ -17,7 +17,7 @@
 //!   This makes UI reload trivial *and* lets us reconstruct OpenAI ChatMessage
 //!   history without a second column.
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -147,39 +147,14 @@ const BROADCAST_CAPACITY: usize = 1024;
 const DEFAULT_MAX_STEPS: usize = 200;
 const DEFAULT_SUBAGENT_MAX_STEPS: usize = 40;
 const OPENAI_MAX_TOOLS: usize = 128;
-const DEFAULT_INITIAL_NEXT_TOOLS: usize = 8;
-
-fn initial_next_tool_limit() -> usize {
-    std::env::var("OPERON_AGENT_INITIAL_CONNECTOR_TOOLS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_INITIAL_NEXT_TOOLS)
-        .min(24)
-}
 
 fn provider_tool_definitions(
     provider: &str,
     channel: &str,
-    next_tools: &[crate::agent::next_bridge::NextToolDescriptor],
-    loaded_next_tool_names: &HashSet<String>,
-    prompt: &str,
 ) -> Vec<Value> {
-    let mut definitions =
-        tools::tool_definitions_for_loaded_next(channel, next_tools, Some(loaded_next_tool_names));
+    let mut definitions = tools::tool_definitions(channel);
 
     if provider != "anthropic" && definitions.len() > OPENAI_MAX_TOOLS {
-        let native_count = tools::tool_definitions_with_next(channel, &[])
-            .len()
-            .min(definitions.len());
-        if native_count < definitions.len() {
-            let mut connector_tools = definitions.split_off(native_count);
-            connector_tools.sort_by(|left, right| {
-                tool_relevance_score(right, prompt, channel)
-                    .cmp(&tool_relevance_score(left, prompt, channel))
-            });
-            definitions.extend(connector_tools);
-        }
-
         let omitted = definitions.len() - OPENAI_MAX_TOOLS;
         let omitted_names: Vec<String> = definitions
             .iter()
@@ -203,130 +178,6 @@ fn provider_tool_definitions(
     }
 
     definitions
-}
-
-fn initial_loaded_next_tool_names(
-    channel: &str,
-    next_tools: &[crate::agent::next_bridge::NextToolDescriptor],
-    prompt: &str,
-) -> HashSet<String> {
-    let native_names = tools::native_tool_names(channel);
-    let mut ranked: Vec<(i32, String)> = next_tools
-        .iter()
-        .filter(|tool| !native_names.contains(&tool.name))
-        .map(|tool| {
-            let definition = json!({
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                }
-            });
-            (
-                tool_relevance_score(&definition, prompt, channel),
-                tool.name.clone(),
-            )
-        })
-        .filter(|(score, _)| *score > 0)
-        .collect();
-
-    ranked.sort_by(|(left_score, left_name), (right_score, right_name)| {
-        right_score
-            .cmp(left_score)
-            .then_with(|| left_name.cmp(right_name))
-    });
-
-    ranked
-        .into_iter()
-        .take(initial_next_tool_limit())
-        .map(|(_, name)| name)
-        .collect()
-}
-
-fn tool_search_loaded_names(result: &Value) -> Vec<String> {
-    result
-        .get("tools")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_owned))
-        .collect()
-}
-
-fn tool_relevance_score(tool: &Value, prompt: &str, channel: &str) -> i32 {
-    let function = tool.get("function").unwrap_or(&Value::Null);
-    let name = function
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let description = function
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let prompt = prompt.to_ascii_lowercase();
-    let haystack = format!("{name} {description}");
-    let mut score = 0;
-
-    for token in prompt
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .filter(|token| token.len() >= 3)
-    {
-        if name.contains(token) {
-            score += 8;
-        } else if description.contains(token) {
-            score += 2;
-        }
-    }
-
-    let boosts: &[(&[&str], &[&str])] = &[
-        (
-            &["gmail", "email", "mail", "inbox"],
-            &["gmail", "email", "mail"],
-        ),
-        (
-            &["calendar", "meeting", "schedule", "event"],
-            &["calendar", "event"],
-        ),
-        (
-            &["github", "repo", "pull", "issue", "branch", "commit"],
-            &["github", "repo", "pull", "issue", "branch", "commit"],
-        ),
-        (&["vercel", "deploy", "deployment"], &["vercel", "deploy"]),
-        (&["whatsapp"], &["whatsapp"]),
-        (&["telegram"], &["telegram"]),
-        (&["memory", "remember", "recall"], &["memory"]),
-        (
-            &["web", "search", "browser", "url"],
-            &["search", "web", "browser", "fetch"],
-        ),
-        (
-            &["facebook", "meta", "ads", "campaign", "social"],
-            &["facebook", "meta", "ads", "campaign", "social"],
-        ),
-        (
-            &["stripe", "payment", "invoice", "customer"],
-            &["stripe", "payment", "invoice", "customer"],
-        ),
-    ];
-
-    for (prompt_terms, tool_terms) in boosts {
-        if prompt_terms.iter().any(|term| prompt.contains(term))
-            && tool_terms.iter().any(|term| haystack.contains(term))
-        {
-            score += 40;
-        }
-    }
-
-    if channel == "coding"
-        && ["file", "code", "terminal", "workspace", "search"]
-            .iter()
-            .any(|term| haystack.contains(term))
-    {
-        score += 10;
-    }
-
-    score
 }
 
 #[derive(Clone)]
@@ -407,8 +258,6 @@ pub struct RunnerSpec {
     pub db: Pool<Postgres>,
     pub max_steps: usize,
     pub channel: String,
-    pub next_base_url: String,
-    pub next_service_token: String,
     /// Reasoning effort hint forwarded to the provider. One of
     /// "none" | "auto" | "low" | "medium" | "high".
     pub reasoning_level: Option<String>,
@@ -456,35 +305,12 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         .build()
         .context("building reqwest client")?;
 
-    let agent_ctx = {
-        let bridge = if !spec.next_base_url.is_empty() && !spec.next_service_token.is_empty() {
-            Some(crate::agent::next_bridge::NextBridge::new(
-                client.clone(),
-                spec.next_base_url.clone(),
-                spec.next_service_token.clone(),
-                spec.channel.clone(),
-                Some(spec.conversation_id.to_string()),
-            ))
-        } else {
-            None
-        };
-        let next_tools = if let Some(b) = &bridge {
-            b.list_tools().await.unwrap_or_else(|err| {
-                tracing::warn!(error = %err, "failed to load Next.js tool catalog");
-                Vec::new()
-            })
-        } else {
-            Vec::new()
-        };
-        AgentContext::new(
-            spec.workspace.clone(),
-            client.clone(),
-            spec.github_token.clone(),
-            spec.channel.clone(),
-            bridge,
-            next_tools,
-        )
-    };
+    let agent_ctx = AgentContext::new(
+        spec.workspace.clone(),
+        client.clone(),
+        spec.github_token.clone(),
+        spec.channel.clone(),
+    );
 
     let mut messages: Vec<ChatMessage> = Vec::new();
     messages.push(ChatMessage {
@@ -513,12 +339,6 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         messages.extend(prior);
     }
 
-    let mut loaded_next_tool_names = initial_loaded_next_tool_names(
-        &spec.channel,
-        &agent_ctx.next_tools,
-        &spec.initial_user_message,
-    );
-
     for _step in 0..spec.max_steps {
         if handle.cancel.is_cancelled() {
             anyhow::bail!("run cancelled");
@@ -527,15 +347,52 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         // Per-step retry counter for transparent connection-reset recovery.
         // When the provider resets mid-stream before any content is emitted,
         // we re-issue the exact same request up to this many times.
-        let mut step_connection_retries: u32 = 0;
+        // Uses a labeled inner loop so retries don't consume step budget.
         const MAX_STEP_CONNECTION_RETRIES: u32 = 3;
+        let mut step_connection_retries: u32 = 0;
 
-        let tool_definitions = provider_tool_definitions(
-            &spec.provider,
-            &spec.channel,
-            &agent_ctx.next_tools,
-            &loaded_next_tool_names,
-            &spec.initial_user_message,
+        let mut text_started = false;
+        let mut accumulated_text = String::new();
+        let mut accumulated_reasoning = String::new();
+        let mut reasoning_id: Option<String> = None;
+        let mut tool_call_started: Vec<bool> = Vec::new();
+        let mut streamed_tool_info: Vec<(String, String)> = Vec::new();
+        let mut final_tool_calls: Vec<ToolCall> = Vec::new();
+        let mut finish_reason = String::new();
+        let mut usage: Option<(u64, u64, u64)> = None;
+        let mut provider_notices: Vec<Value> = Vec::new();
+        let mut provider_request_id: Option<String> = None;
+        let mut stream_failed: Option<String> = None;
+        let mut stream_interrupted_retriable = false;
+
+        'retry_step: loop {
+        // ---- inner retry loop starts here ----
+        // Reset per-attempt state (keep retry counter)
+        text_started = false;
+        accumulated_text.clear();
+        accumulated_reasoning.clear();
+        reasoning_id = None;
+        tool_call_started.clear();
+        streamed_tool_info.clear();
+        final_tool_calls.clear();
+        finish_reason.clear();
+        usage = None;
+        provider_notices.clear();
+        provider_request_id = None;
+        stream_failed = None;
+        stream_interrupted_retriable = false;
+
+        let tool_definitions = provider_tool_definitions(&spec.provider, &spec.channel);
+
+        tracing::info!(
+            run_id = %spec.run_id,
+            step = _step,
+            provider = %spec.provider,
+            model = %spec.model,
+            messages_count = messages.len(),
+            tools_count = tool_definitions.len(),
+            retry_attempt = step_connection_retries,
+            "llm_request_start"
         );
 
         let stream = if spec.provider == "anthropic" {
@@ -575,21 +432,6 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             futures::future::Either::Right(s)
         };
         tokio::pin!(stream);
-
-        let mut text_started = false;
-        let mut accumulated_text = String::new();
-        let mut accumulated_reasoning = String::new();
-        let mut reasoning_id: Option<String> = None;
-        let mut tool_call_started: Vec<bool> = Vec::new();
-        let mut final_tool_calls: Vec<ToolCall> = Vec::new();
-        let mut finish_reason = String::new();
-        let mut usage: Option<(u64, u64, u64)> = None;
-        let mut provider_notices: Vec<Value> = Vec::new();
-        let mut provider_request_id: Option<String> = None;
-        let mut stream_failed: Option<String> = None;
-        // When set, the step will be retried silently (connection reset before
-        // any content was emitted).
-        let mut stream_interrupted_retriable = false;
 
         while let Some(event) = stream.next().await {
             if handle.cancel.is_cancelled() {
@@ -639,6 +481,9 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                     while tool_call_started.len() <= index {
                         tool_call_started.push(false);
                     }
+                    while streamed_tool_info.len() <= index {
+                        streamed_tool_info.push((String::new(), String::new()));
+                    }
                     if !tool_call_started[index] {
                         // Args aren't streamed yet — emit start with the
                         // tool name only; runner will follow up with
@@ -653,6 +498,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                             ))
                             .await?;
                         tool_call_started[index] = true;
+                        streamed_tool_info[index] = (id.clone(), name.clone());
                     }
                 }
                 OpenAiEvent::ToolCallInputDelta { id, arguments, .. } => {
@@ -757,13 +603,39 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                 "stream connection reset — retrying step transparently"
             );
             tokio::time::sleep(delay).await;
-            continue; // outer for _step loop — re-issues the same step
+            continue 'retry_step; // inner loop — retry same step without consuming budget
         }
+        break 'retry_step; // success or non-retriable error — exit retry loop
+        } // end 'retry_step loop
 
         // If the underlying provider stream errored mid-flight, persist the
         // partial assistant turn (so the user sees their inline error card on
         // reload) and bail out cleanly with a typed error.
         if let Some(err_msg) = stream_failed.clone() {
+            // Cleanup: emit tool-call-output-error for any tool calls that started
+            // during streaming but never completed (prevents UI stuck in loading)
+            for (idx, started) in tool_call_started.iter().enumerate() {
+                if *started {
+                    if let Some((tc_id, tc_name)) = streamed_tool_info.get(idx) {
+                        if !tc_id.is_empty() {
+                            handle
+                                .emit(&events::tool_call_output_error(
+                                    tc_id,
+                                    "Stream interrupted before tool execution",
+                                ))
+                                .await?;
+                            handle.emit(&events::tool_call_end(tc_id)).await?;
+                            tracing::debug!(
+                                run_id = %spec.run_id,
+                                tool_call_id = %tc_id,
+                                tool_name = %tc_name,
+                                "emitted cleanup tool-call-output-error for orphaned tool card"
+                            );
+                        }
+                    }
+                }
+            }
+
             let mut assistant_parts: Vec<Value> = Vec::new();
             assistant_parts.extend(provider_notices.clone());
             if !accumulated_reasoning.is_empty() {
@@ -844,8 +716,24 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
         };
         messages.push(assistant_message.clone());
 
+        // Warn if the model hit its output token limit (response truncated).
+        if finish_reason == "length" {
+            tracing::warn!(run_id = %spec.run_id, "model hit max_tokens limit - response truncated");
+            handle.emit(&events::warning("Response was truncated because the model reached its output token limit. Try a shorter prompt or enable a model with higher output limits.")).await?;
+        }
+
+        tracing::info!(
+            run_id = %spec.run_id,
+            step = _step,
+            finish_reason = %finish_reason,
+            text_len = accumulated_text.len(),
+            tool_calls_count = final_tool_calls.len(),
+            has_usage = usage.is_some(),
+            "llm_stream_ended"
+        );
+
         // No tool calls → final answer.
-        if final_tool_calls.is_empty() || finish_reason == "stop" {
+        if final_tool_calls.is_empty() {
             persist_message(
                 &spec.db,
                 &spec.conversation_id,
@@ -875,8 +763,21 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
 
         // Execute every tool call inline; record the invocation + result as
         // a single rich part on the assistant message.
-        for tc in &final_tool_calls {
+        for (tc_idx, tc) in final_tool_calls.iter().enumerate() {
             if handle.cancel.is_cancelled() {
+                // Cleanup: emit tool-call-output-error for remaining tool calls
+                // that had tool-call-start emitted during streaming.
+                for remaining_tc in final_tool_calls.iter().skip(tc_idx) {
+                    if !remaining_tc.id.is_empty() {
+                        handle
+                            .emit(&events::tool_call_output_error(
+                                &remaining_tc.id,
+                                "Run cancelled",
+                            ))
+                            .await?;
+                        handle.emit(&events::tool_call_end(&remaining_tc.id)).await?;
+                    }
+                }
                 anyhow::bail!("run cancelled");
             }
             let parsed_input: Value = normalize_tool_arguments(&tc.function.arguments);
@@ -949,6 +850,7 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                 "state": "executing",
             }));
 
+            let tool_start = std::time::Instant::now();
             let dispatch_result = if is_subagent {
                 execute_subagent(
                     &spec,
@@ -968,21 +870,17 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
             } else {
                 tools::dispatch(&agent_ctx, &tc.function.name, &parsed_input).await
             };
+            let tool_elapsed = tool_start.elapsed();
             let (result_value, error_text) = match dispatch_result {
                 Ok(value) => {
-                    if tc.function.name == "tool_search" {
-                        let loaded_names = tool_search_loaded_names(&value);
-                        if !loaded_names.is_empty() {
-                            for name in &loaded_names {
-                                loaded_next_tool_names.insert(name.clone());
-                            }
-                            tracing::info!(
-                                loaded_tools = ?loaded_names,
-                                total_loaded = loaded_next_tool_names.len(),
-                                "loaded deferred tools from tool_search"
-                            );
-                        }
-                    }
+                    tracing::info!(
+                        run_id = %spec.run_id,
+                        tool = %tc.function.name,
+                        tool_call_id = %tc.id,
+                        duration_ms = tool_elapsed.as_millis() as u64,
+                        success = true,
+                        "tool_executed"
+                    );
                     handle
                         .emit(&events::tool_call_output_available(
                             &tc.id,
@@ -994,6 +892,14 @@ async fn run(spec: RunnerSpec, handle: RunHandle) -> Result<()> {
                 }
                 Err(err) => {
                     let text = err.to_string();
+                    tracing::warn!(
+                        run_id = %spec.run_id,
+                        tool = %tc.function.name,
+                        tool_call_id = %tc.id,
+                        duration_ms = tool_elapsed.as_millis() as u64,
+                        error = %text,
+                        "tool_execution_failed"
+                    );
                     handle
                         .emit(&events::tool_call_output_error(&tc.id, &text))
                         .await?;
@@ -1389,8 +1295,6 @@ async fn execute_subagent(
         db: parent_spec.db.clone(),
         max_steps: default_subagent_max_steps(),
         channel: parent_spec.channel.clone(),
-        next_base_url: parent_spec.next_base_url.clone(),
-        next_service_token: parent_spec.next_service_token.clone(),
         reasoning_level: parent_spec.reasoning_level.clone(),
         agents: parent_spec.agents.clone(),
     };

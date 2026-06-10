@@ -335,9 +335,16 @@ pub async fn append_message(
 ///
 /// Frame shape: `{"type": "...", "data": {...}}` — same envelope as the run
 /// SSE stream so the frontend can reuse the same parser.
+#[derive(Deserialize, Default)]
+pub struct CompactQuery {
+    #[serde(default)]
+    pub mode: Option<String>, // "heuristic" (default) | "llm"
+}
+
 pub async fn compact_conversation(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    Query(query): Query<CompactQuery>,
     headers: HeaderMap,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let user_id = require_user(&state, &headers)?;
@@ -353,7 +360,7 @@ pub async fn compact_conversation(
     }
 
     let (tx, rx) = mpsc::channel::<Value>(64);
-    tokio::spawn(run_compaction(state.clone(), id, user_id, tx));
+    tokio::spawn(run_compaction(state.clone(), id, user_id, query.mode, tx));
 
     let stream = ReceiverStream::new(rx).map(|payload| {
         Ok::<Event, Infallible>(
@@ -374,6 +381,7 @@ async fn run_compaction(
     state: AppState,
     conversation_id: Uuid,
     user_id: Uuid,
+    mode: Option<String>,
     tx: mpsc::Sender<Value>,
 ) {
     use crate::agent::openai::ChatMessage;
@@ -421,6 +429,15 @@ async fn run_compaction(
     let cutoff = rows.len() - 8;
     let to_compact: Vec<&sqlx::postgres::PgRow> = rows.iter().take(cutoff).collect();
 
+    let use_llm = mode.as_deref() == Some("llm");
+
+    tracing::info!(
+        conversation_id = %conversation_id,
+        mode = %mode.as_deref().unwrap_or("heuristic"),
+        messages_to_compact = to_compact.len(),
+        "compaction_started"
+    );
+
     send(compact_event(
         "progress",
         json!({
@@ -430,98 +447,98 @@ async fn run_compaction(
     ))
     .await;
 
-    // Try LLM-driven summary first (best-effort). Fallback: structural heuristic.
+    // Default: heuristic (zero LLM cost). Only use LLM when caller passes mode=llm.
     let mut summary = String::new();
     let mut used_llm = false;
 
-    if let Some((provider, model, api_key)) =
-        resolve_summarisation_provider(&state, conversation_id, user_id).await
-    {
-        let base_url = crate::http::agent::provider_base_url(&provider).to_owned();
-        let prompt = build_summarisation_prompt(&to_compact);
-        let messages = vec![
-            ChatMessage {
-                role: "system".into(),
-                content: Some(serde_json::Value::String(
-                    "You compress chat history. Produce a concise (≤200 word) bullet \
-                     summary capturing user goals, decisions made, key facts, and any \
-                     unresolved questions. Use plain text bullets, no preamble."
-                        .into(),
-                )),
-                name: None,
-                tool_call_id: None,
-                tool_calls: None,
-            },
-            ChatMessage {
-                role: "user".into(),
-                content: Some(serde_json::Value::String(prompt)),
-                name: None,
-                tool_call_id: None,
-                tool_calls: None,
-            },
-        ];
+    if use_llm {
+        if let Some((provider, model, api_key)) =
+            resolve_summarisation_provider(&state, conversation_id, user_id).await
+        {
+            let base_url = crate::http::agent::provider_base_url(&provider).to_owned();
+            let prompt = build_summarisation_prompt(&to_compact);
+            let messages = vec![
+                ChatMessage {
+                    role: "system".into(),
+                    content: Some(serde_json::Value::String(
+                        "You compress chat history. Produce a concise (≤200 word) bullet \
+                         summary capturing user goals, decisions made, key facts, and any \
+                         unresolved questions. Use plain text bullets, no preamble."
+                            .into(),
+                    )),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+                ChatMessage {
+                    role: "user".into(),
+                    content: Some(serde_json::Value::String(prompt)),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+            ];
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .tcp_keepalive(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap_or_default();
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(120))
+                .tcp_keepalive(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_default();
 
-        // Up to 2 attempts (1 retry) with a small backoff before falling back
-        // to the heuristic. The provider clients also retry rate limits
-        // internally, so this only catches structural failures.
-        let mut last_err: Option<String> = None;
-        for attempt in 1..=2u32 {
-            summary.clear();
-            if attempt > 1 {
+            let mut last_err: Option<String> = None;
+            for attempt in 1..=2u32 {
+                summary.clear();
+                if attempt > 1 {
+                    send(compact_event(
+                        "progress",
+                        json!({
+                            "status": "active",
+                            "text": format!("Retrying LLM summary (attempt {attempt}/2)"),
+                        }),
+                    ))
+                    .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+                }
+                let summarise_res = summarise_with_provider(
+                    &client,
+                    &provider,
+                    &model,
+                    &api_key,
+                    &base_url,
+                    &messages,
+                    &mut summary,
+                    &send,
+                )
+                .await;
+                match summarise_res {
+                    Ok(()) if !summary.trim().is_empty() => {
+                        used_llm = true;
+                        last_err = None;
+                        break;
+                    }
+                    Ok(()) => {
+                        last_err = Some("provider returned empty summary".into());
+                    }
+                    Err(e) => {
+                        last_err = Some(format!("{e}"));
+                    }
+                }
+            }
+            if let Some(err) = last_err {
                 send(compact_event(
                     "progress",
                     json!({
                         "status": "active",
-                        "text": format!("Retrying LLM summary (attempt {attempt}/2)"),
+                        "text": format!("LLM summary failed ({err}); using heuristic fallback"),
                     }),
                 ))
                 .await;
-                tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+                summary.clear();
             }
-            let summarise_res = summarise_with_provider(
-                &client,
-                &provider,
-                &model,
-                &api_key,
-                &base_url,
-                &messages,
-                &mut summary,
-                &send,
-            )
-            .await;
-            match summarise_res {
-                Ok(()) if !summary.trim().is_empty() => {
-                    used_llm = true;
-                    last_err = None;
-                    break;
-                }
-                Ok(()) => {
-                    last_err = Some("provider returned empty summary".into());
-                }
-                Err(e) => {
-                    last_err = Some(format!("{e}"));
-                }
-            }
-        }
-        if let Some(err) = last_err {
-            send(compact_event(
-                "progress",
-                json!({
-                    "status": "active",
-                    "text": format!("LLM summary failed ({err}); using fallback"),
-                }),
-            ))
-            .await;
-            summary.clear();
         }
     }
 
+    // Always fall through to heuristic if LLM is not requested or failed
     if !used_llm {
         summary = heuristic_summary(&to_compact);
         // Stream the heuristic summary in chunks too, so the UI animates.
@@ -591,49 +608,56 @@ async fn run_compaction(
     .await;
 }
 
-/// Look up the most recent run's model on this conversation and resolve the
-/// provider's API key from `provider_profiles`. Returns
-/// `Some((provider, model, api_key))` on success, `None` otherwise.
+/// Resolve a CHEAP model for summarisation. Prefers gpt-4o-mini via the user's
+/// OpenAI key or the platform key; falls back to groq. Never uses the
+/// conversation's expensive model.
 async fn resolve_summarisation_provider(
     state: &AppState,
-    conversation_id: Uuid,
+    _conversation_id: Uuid,
     user_id: Uuid,
 ) -> Option<(String, String, String)> {
-    let row = sqlx::query(
-        "select model from runs where conversation_id = $1 and model is not null \
-         order by created_at desc limit 1",
-    )
-    .bind(conversation_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten()?;
-    let model_full: String = row.try_get("model").ok()?;
-    let (provider, model_id) = if let Some(slash) = model_full.find('/') {
-        (
-            model_full[..slash].to_owned(),
-            model_full[slash + 1..].to_owned(),
+    // 1) Try OpenAI gpt-4o-mini (cheapest good summariser)
+    let openai_key = {
+        let key_row = sqlx::query(
+            "select api_key_ciphertext from provider_profiles where user_id = $1 and provider = 'openai'",
         )
-    } else {
-        ("openai".to_owned(), model_full)
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
+        key_row
+            .and_then(|r| r.try_get::<Option<String>, _>("api_key_ciphertext").ok().flatten())
+            .filter(|k| !k.is_empty())
+            .or_else(|| state.config.openai_api_key.clone())
     };
 
-    let key_row = sqlx::query(
-        "select api_key_ciphertext from provider_profiles where user_id = $1 and provider = $2",
-    )
-    .bind(user_id)
-    .bind(&provider)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
+    if let Some(key) = openai_key {
+        return Some(("openai".to_owned(), "gpt-4o-mini".to_owned(), key));
+    }
 
-    let api_key = key_row
-        .and_then(|r| r.try_get::<Option<String>, _>("api_key_ciphertext").ok().flatten())
-        .filter(|k| !k.is_empty())
-        .or_else(|| state.config.openai_api_key.clone())?;
+    // 2) Try Groq (free tier, fast)
+    let groq_key = {
+        let key_row = sqlx::query(
+            "select api_key_ciphertext from provider_profiles where user_id = $1 and provider = 'groq'",
+        )
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
 
-    Some((provider, model_id, api_key))
+        key_row
+            .and_then(|r| r.try_get::<Option<String>, _>("api_key_ciphertext").ok().flatten())
+            .filter(|k| !k.is_empty())
+    };
+
+    if let Some(key) = groq_key {
+        return Some(("groq".to_owned(), "llama-3.1-8b-instant".to_owned(), key));
+    }
+
+    None
 }
 
 fn build_summarisation_prompt(rows: &[&sqlx::postgres::PgRow]) -> String {

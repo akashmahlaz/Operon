@@ -2,7 +2,6 @@
 import { useState, useRef } from 'react';
 import Link from "next/link";
 import { ArrowRight, ChevronDown, Menu, X } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { OperonWordmark } from "@/components/brand";
 import { useOperonSession } from "@/components/ui/session-provider";
 
@@ -94,11 +93,11 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-2xl border-b border-gray-100/60">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-2xl border-b border-border/60">
       <div className="max-w-7xl mx-auto px-6 lg:px-8 flex items-center justify-between h-16">
         {/* Logo */}
         <Link href="/" className="flex items-center shrink-0 -ml-1">
-          <OperonWordmark height={24} className="text-gray-950" />
+          <OperonWordmark height={24} className="text-foreground" />
         </Link>
 
         {/* Desktop Nav — mega dropdown */}
@@ -111,8 +110,8 @@ export default function Navbar() {
               onMouseLeave={handleMouseLeave}
             >
               <button
-                className={`flex items-center gap-1 px-4 py-2 text-xs font-semibold tracking-widest transition-colors rounded-lg hover:bg-gray-50 ${
-                  activeDropdown === label ? 'text-gray-900' : 'text-gray-500'
+                className={`flex items-center gap-1 px-4 py-2 text-xs font-semibold tracking-widest transition-colors rounded-lg hover:bg-accent ${
+                  activeDropdown === label ? 'text-foreground' : 'text-muted-foreground'
                 }`}
               >
                 {label}
@@ -121,14 +120,9 @@ export default function Navbar() {
                 />
               </button>
 
-              <AnimatePresence>
-                {activeDropdown === label && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 8 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white rounded-2xl shadow-2xl shadow-gray-200/60 border border-gray-100 p-5 min-w-85"
+              {activeDropdown === label && (
+                  <div
+                    className="absolute top-full left-1/2 -translate-x-1/2 mt-1 min-w-85 animate-in fade-in slide-in-from-top-2 duration-150 rounded-2xl border border-border bg-popover p-5 text-popover-foreground shadow-2xl shadow-black/10"
                     onMouseEnter={() => handleMouseEnter(label)}
                     onMouseLeave={handleMouseLeave}
                   >
@@ -141,7 +135,7 @@ export default function Navbar() {
                     >
                       {navDropdowns[label].sections.map((section) => (
                         <div key={section.title}>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">
+                          <p className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-3">
                             {section.title}
                           </p>
                           <div className="space-y-1">
@@ -149,13 +143,13 @@ export default function Navbar() {
                               <a
                                 key={item.name}
                                 href={item.href}
-                                className="group flex flex-col px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors"
+                                className="group flex flex-col px-3 py-2.5 rounded-xl hover:bg-accent transition-colors"
                               >
-                                <span className="text-sm font-semibold text-gray-800 group-hover:text-gray-900 flex items-center gap-1">
+                                <span className="text-sm font-semibold text-foreground flex items-center gap-1">
                                   {item.name}
                                   <ArrowRight className="size-3 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" />
                                 </span>
-                                <span className="text-xs text-gray-400 mt-0.5">
+                                <span className="text-xs text-muted-foreground mt-0.5">
                                   {item.desc}
                                 </span>
                               </a>
@@ -164,9 +158,8 @@ export default function Navbar() {
                         </div>
                       ))}
                     </div>
-                  </motion.div>
+                  </div>
                 )}
-              </AnimatePresence>
             </div>
           ))}
         </div>
@@ -184,7 +177,7 @@ export default function Navbar() {
             <>
               <Link
                 href="/login"
-                className="px-5 py-2.5 border border-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-50 transition-all"
+                className="px-5 py-2.5 border border-border text-muted-foreground text-sm font-medium rounded-full hover:bg-accent hover:text-foreground transition-all"
               >
                 Log in
               </Link>
@@ -200,28 +193,25 @@ export default function Navbar() {
 
         {/* Mobile toggle */}
         <button
-          className="md:hidden p-2 -mr-2 text-gray-600 hover:text-gray-900"
+          className="md:hidden p-2 -mr-2 text-muted-foreground hover:text-foreground"
           onClick={() => setMobileOpen(!mobileOpen)}
+          aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+          aria-expanded={mobileOpen}
         >
           {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
         </button>
       </div>
 
       {/* Mobile menu */}
-      <AnimatePresence>
-        {mobileOpen && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-            className="md:hidden bg-white border-t border-gray-100 overflow-hidden"
+      {mobileOpen && (
+          <div
+            className="md:hidden animate-in fade-in slide-in-from-top-2 duration-200 border-t border-border bg-background overflow-hidden"
           >
             <div className="px-6 py-4 space-y-1">
               {Object.keys(navDropdowns).map((label) => (
                 <button
                   key={label}
-                  className="block w-full text-left text-xs font-bold tracking-widest text-gray-600 py-3 border-b border-gray-50"
+                  className="block w-full text-left text-xs font-bold tracking-widest text-muted-foreground py-3 border-b border-border/60"
                 >
                   {label}
                 </button>
@@ -244,7 +234,7 @@ export default function Navbar() {
                     </Link>
                     <Link
                       href="/login"
-                      className="block w-full text-center px-5 py-3 border border-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-50"
+                      className="block w-full text-center px-5 py-3 border border-border text-muted-foreground text-sm font-medium rounded-full hover:bg-accent hover:text-foreground"
                     >
                       Log in
                     </Link>
@@ -252,9 +242,8 @@ export default function Navbar() {
                 )}
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
     </nav>
   )
 }

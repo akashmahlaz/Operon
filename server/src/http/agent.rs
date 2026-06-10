@@ -202,13 +202,6 @@ pub async fn create_run(
         .filter(|t| !t.is_empty())
     };
 
-    let next_service_token = crate::http::auth::mint_service_token(
-        &state.config.jwt_secret,
-        user_id,
-        60 * 60, // 1h is plenty for one chat turn
-    )
-    .unwrap_or_default();
-
     let handle = runner::spawn(RunnerSpec {
         run_id,
         user_id,
@@ -231,8 +224,6 @@ pub async fn create_run(
             runner::default_max_steps()
         },
         channel: channel.to_owned(),
-        next_base_url: state.config.next_base_url.clone(),
-        next_service_token,
         reasoning_level: payload.reasoning_level.clone(),
         agents: state.agents.clone(),
     });

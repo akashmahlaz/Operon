@@ -154,8 +154,9 @@
     --thinking-shimmer: oklch(0.205 0.015 247);
 
     /* Reserve vertical space on the streaming assistant message so the
-       page does not jump as text streams in. */
-    --chat-streaming-min-h: 240px;
+       page does not jump as text streams in. Kept small (80px) to avoid
+       a jarring initial jump when the response starts. */
+    --chat-streaming-min-h: 80px;
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -450,6 +451,8 @@
     content: "";
     display: inline-block;
     width: 1.25em;
+    max-width: 1.25em;
+    overflow: hidden;
     text-align: left;
     animation: var(--animate-ellipsis);
 }
@@ -460,7 +463,7 @@
    containment so layout work is bounded to this subtree (avoids reflowing
    the whole conversation on every token). */
 [data-chat-streaming="true"] {
-    min-height: var(--chat-streaming-min-h, 240px);
+    min-height: var(--chat-streaming-min-h, 80px);
     contain: layout style;
 }
 

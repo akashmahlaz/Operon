@@ -175,6 +175,33 @@ impl ThinkSplitter {
     }
 }
 
+/// Returns a sensible max output token limit based on the provider/model.
+/// Some providers (MiniMax, Groq) have very low defaults if not specified.
+fn provider_max_output_tokens(_base_url: &str, model: &str) -> Option<u64> {
+    // Don't send max_tokens for o1/o3 reasoning models (they use max_completion_tokens)
+    if model.contains("o1") || model.contains("o3") {
+        return None;
+    }
+    let tokens: u64 = if model.contains("gpt-4o") {
+        16_384
+    } else if model.contains("claude") {
+        8_192
+    } else if model.contains("gemini") {
+        8_192
+    } else {
+        // Safe default for MiniMax, Groq, DeepSeek, OpenRouter, etc.
+        8_192
+    };
+    Some(tokens)
+}
+
+/// Returns true if the provider is known to support `stream_options: { include_usage: true }`.
+fn supports_stream_options(base_url: &str) -> bool {
+    base_url.contains("api.openai.com")
+        || base_url.contains("api.groq.com")
+        || base_url.contains("api.deepseek.com")
+}
+
 /// Map UI-level reasoning hint ("none"|"auto"|"low"|"medium"|"high") to
 /// OpenAI's `reasoning_effort` value. Returns `None` to omit the field
 /// (so non-reasoning models aren't broken by an unexpected key).
@@ -201,12 +228,19 @@ pub async fn stream_chat(
 ) -> Result<impl Stream<Item = Result<OpenAiEvent>> + use<>> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
+    tracing::debug!(model = %model, base_url = %base_url, "openai_stream_start");
+
     let mut body = serde_json::json!({
         "model": model,
         "stream": true,
-        "stream_options": { "include_usage": true },
         "messages": messages,
     });
+    if supports_stream_options(base_url) {
+        body["stream_options"] = serde_json::json!({ "include_usage": true });
+    }
+    if let Some(max_tokens) = provider_max_output_tokens(base_url, model) {
+        body["max_tokens"] = serde_json::json!(max_tokens);
+    }
     // Only include tools/tool_choice when there are actual tools defined.
     // Sending tool_choice:"auto" with an empty array is rejected by many providers.
     if !tools.is_empty() {
@@ -462,9 +496,12 @@ fn parse_sse(
         let mut tool_call_indices: HashMap<usize, ToolCall> = HashMap::new();
         let mut splitter = ThinkSplitter::new();
         let mut pending_finish_reason: Option<String> = None;
+        let mut chunk_count: u64 = 0;
+        let mut had_any_content = false;
 
         while let Some(chunk) = upstream.next().await {
             let chunk = chunk.context("reading OpenAI stream")?;
+            chunk_count += 1;
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
             loop {
@@ -489,6 +526,7 @@ fn parse_sse(
                                 "tool_calls".to_owned()
                             }
                         });
+                        tracing::info!(saw_done = true, chunks_received = chunk_count, "openai_stream_end");
                         yield OpenAiEvent::Finished {
                             finish_reason,
                             tool_calls: tool_calls.into_iter().map(|(_, c)| c).collect(),
@@ -498,8 +536,16 @@ fn parse_sse(
 
                     let json: Value = match serde_json::from_str(payload) {
                         Ok(v) => v,
-                        Err(_) => continue,
+                        Err(e) => {
+                            tracing::warn!(payload = %payload, error = %e, "openai_stream_parse_error");
+                            continue;
+                        }
                     };
+
+                    // Detect provider-level error objects in the stream
+                    if let Some(err_obj) = json.get("error") {
+                        tracing::warn!(error = %err_obj, "openai_stream_error_chunk");
+                    }
 
                     if let Some(usage) = json.get("usage") {
                         let prompt_tokens = usage.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0);
@@ -614,8 +660,33 @@ fn parse_sse(
                     {
                         pending_finish_reason = Some(reason.to_owned());
                     }
+
+                    // Track that we received meaningful content from the stream
+                    had_any_content = true;
                 }
             }
+        }
+
+        // Stream ended without receiving [DONE]
+        if had_any_content {
+            tracing::warn!(chunks_received = chunk_count, "openai stream ended without [DONE] sentinel");
+            let mut tool_calls: Vec<(usize, ToolCall)> =
+                tool_call_indices.drain().collect();
+            tool_calls.sort_by_key(|(i, _)| *i);
+            let finish_reason = pending_finish_reason.take().unwrap_or_else(|| {
+                if tool_calls.is_empty() {
+                    "stop".to_owned()
+                } else {
+                    "tool_calls".to_owned()
+                }
+            });
+            tracing::info!(saw_done = false, chunks_received = chunk_count, "openai_stream_end");
+            yield OpenAiEvent::Finished {
+                finish_reason,
+                tool_calls: tool_calls.into_iter().map(|(_, c)| c).collect(),
+            };
+        } else {
+            tracing::info!(saw_done = false, chunks_received = chunk_count, "openai_stream_end (empty)");
         }
     }
 }

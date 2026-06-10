@@ -50,12 +50,13 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
   const session = useOperonSession();
   const currentUser = session.user ?? user;
   const [query, setQuery] = React.useState("");
+  const deferredQuery = React.useDeferredValue(query);
 
   const filteredConversations = React.useMemo(() => {
-    if (!query.trim()) return conversations;
-    const q = query.toLowerCase();
+    if (!deferredQuery.trim()) return conversations;
+    const q = deferredQuery.toLowerCase();
     return conversations.filter((c) => c.title.toLowerCase().includes(q));
-  }, [conversations, query]);
+  }, [conversations, deferredQuery]);
 
   const initials = (currentUser?.name ?? currentUser?.display_name ?? currentUser?.email ?? "U")
     .split(/\s+/)
