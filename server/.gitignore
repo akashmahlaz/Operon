@@ -1,3 +1,7 @@
 Cargo.lock
 Cargo-check.log
 .env
+target/
+.sqlx/
+.git/
+*.log
