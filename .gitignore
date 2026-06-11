@@ -44,6 +44,8 @@ next-env.d.ts
 pnpm-lock.yaml
 /operonx/target/
 
+# Rust server (separate repo - akashmahlaz/operon-server)
+server/
 # Rust server build + sqlx + nested git
 server/.git/
 server/target/
