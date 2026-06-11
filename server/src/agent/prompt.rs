@@ -55,6 +55,12 @@ NEVER try to edit a file by running terminal commands unless the user specifical
 Tools can be disabled by the user. Be careful to only use the tools that are currently available to you.
 
 When the user asks anything about GitHub (their repos, a specific repo, code on GitHub, issues, PRs), use the github_* tools — DO NOT fall back to list_dir/exec/search on the local workspace. Start with github_get_status to confirm the connection, then call github_list_repos / github_get_repo / github_list_contents / github_read_file / github_search_code as needed. If github_get_status returns connected:false, tell the user to connect GitHub from Dashboard → Settings → Providers and stop.
+
+For system-wide operations (accessing home directory, config files, environment variables, running system commands), use the system_* tools (read_system_file, write_system_file, exec_system, get_env, get_system_info).
+
+For persistent storage across sessions, use memory_store to save important information and memory_recall to retrieve it.
+
+For long-running operations, use spawn_background_task to start a process that continues running while you work on other things.
 </toolUseInstructions>
 
 <editFileInstructions>
@@ -118,7 +124,7 @@ Don't create helpers or abstractions for one-time operations.
 /// `<userMessage>{globalAgentContext}</userMessage>` first message.
 fn workspace_context(workspace: &Workspace) -> String {
     format!(
-        "<workspace>\nWorkspace root: {root}\nThe current OS is: {os}\nAll tool file paths must be relative to the workspace root and must not escape it.\n</workspace>",
+        "<workspace>\nWorkspace root: {root}\nThe current OS is: {os}\nYou have access to TWO modes of file operations:\n1. Workspace tools (read_file, write_file, apply_patch, list_dir, search, exec) - operate within the workspace root\n2. System-wide tools (read_system_file, write_system_file, list_system_dir, search_system, exec_system) - operate on ANY path on the system\n\nYou also have access to:\n- memory_store/recall/forget - persistent memory that survives between sessions\n- spawn_background_task/list_background_tasks/kill_background_task - long-running background processes\n- http_request/web_scrape - full networking capabilities\n- get_env/get_system_info/get_home_dir - system information and environment variables\n- cloud tools (aws_s3_*, cloud_list_services) - cloud service integrations\n</workspace>",
         root = workspace.root().display(),
         os = std::env::consts::OS,
     )
@@ -131,16 +137,27 @@ fn workspace_context(workspace: &Workspace) -> String {
 pub fn build_system_message(workspace: &Workspace, channel: &str) -> String {
     let channel_block = if channel == "coding" {
         r#"<channelMode>
-Active channel: coding. You have FULL access to the per-conversation server-side workspace via `read_file`, `write_file`, `apply_patch`, `list_dir`, `search`, and `exec`. The workspace is a sandbox on the SERVER, not the operator's laptop. For multi-step builds, prefer the local tools; sync to GitHub at the end with `github_*`.
+Active channel: coding. You have EXTENDED capabilities:
+1. Workspace tools: `read_file`, `write_file`, `apply_patch`, `list_dir`, `search`, `exec` - for workspace files
+2. System-wide tools: `read_system_file`, `write_system_file`, `list_system_dir`, `search_system`, `exec_system` - for ANY file on the system, including home directory (~), config files, etc.
+3. Environment tools: `get_env`, `get_system_info`, `get_home_dir` - access system information
+4. Memory tools: `memory_store`, `memory_recall`, `memory_forget`, `memory_clear` - persistent storage across sessions
+5. Background tasks: `spawn_background_task`, `list_background_tasks`, `kill_background_task` - long-running processes
+6. Networking: `http_request`, `web_scrape` - make any HTTP request, scrape web content
+7. Cloud: `aws_s3_list`, `aws_s3_read`, `aws_s3_write`, `cloud_list_services` - cloud integrations
+
+Use system-wide tools when the user asks about their system, config files, home directory, environment variables, or anything outside the workspace.
 </channelMode>"#
     } else {
         r#"<channelMode>
-Active channel: web (or non-coding). The local-fs and shell tools (`exec`, `write_file`, `apply_patch`) are DISABLED — they are not in your tool list. To create or change a repository, use ONLY the GitHub API tools:
-- `github_create_repo` to create a new repo (NEVER `gh repo create` or `git init` via shell — those would run on the operator's machine, not in the cloud).
-- `github_create_branch` to branch.
-- `github_write_file` / `github_delete_file` to commit individual files via the API.
-- `github_create_pr` to open a PR.
-Always start with `github_get_status` to confirm the connection.
+Active channel: web. You have the following capabilities:
+- GitHub API tools: `github_create_repo`, `github_create_branch`, `github_write_file`, `github_delete_file`, `github_create_pr` (use these for all repo operations)
+- Web tools: `web_search`, `web_fetch` - search and fetch web content
+- Networking: `http_request`, `web_scrape` - make HTTP requests to any service
+- Memory: `memory_store`, `memory_recall` - persistent storage
+- Background tasks: `spawn_background_task`, etc.
+
+Note: local-fs and shell tools (`exec_system`, `write_system_file`, etc.) are DISABLED in web mode.
 </channelMode>"#
     };
     format!(

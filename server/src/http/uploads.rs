@@ -11,7 +11,7 @@ use crate::{
 
 /// Maximum accepted file size (matches the route-level DefaultBodyLimit minus
 /// some multipart overhead).
-const MAX_FILE_BYTES: usize = 10 * 1024 * 1024;
+const MAX_FILE_BYTES: usize = 100 * 1024 * 1024;
 
 /// Local directory used when S3 credentials are not configured. Files are
 /// served back via `GET /local-uploads/:filename` (ServeDir in router).

@@ -64,11 +64,9 @@ pub fn router(state: AppState) -> Router {
             "/uploads",
             post(uploads::create_upload)
                 // Axum's default request body limit is 2 MiB which silently
-                // 413's typical screenshots/PDFs before our own size check
-                // runs. Bump it to a roomy 25 MiB just for this route; the
-                // handler still enforces a stricter 10 MiB cap on the file
-                // bytes themselves.
-                .layer(DefaultBodyLimit::max(25 * 1024 * 1024)),
+                // 413's larger files before our own size check runs. Bump it
+                // above the handler's 100 MiB file cap for multipart overhead.
+                .layer(DefaultBodyLimit::max(125 * 1024 * 1024)),
         )
         // Serve locally-stored uploads (used as S3 fallback in dev when
         // AWS credentials are not configured).

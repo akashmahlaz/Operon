@@ -599,8 +599,8 @@ function ChatPage() {
   function uploadFiles(files: File[]) {
     if (!files.length) return;
     for (const file of files) {
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error(`${file.name} is too large (max 10 MB)`);
+      if (file.size > 100 * 1024 * 1024) {
+        toast.error(`${file.name} is too large (max 100 MB)`);
         continue;
       }
       const preview = file.type.startsWith("image/")
@@ -1816,7 +1816,6 @@ function ChatPage() {
                   multiple
                   className="hidden"
                   onChange={handleFileChange}
-                  accept="image/*,.pdf,.txt,.csv,.md,.json,.doc,.docx,.xls,.xlsx"
                 />
                 <AI_Input_Search
                   value={input}

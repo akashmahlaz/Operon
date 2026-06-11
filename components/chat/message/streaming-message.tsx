@@ -55,6 +55,7 @@ import {
   Circle,
   Check,
   Copy,
+  Download,
   ExternalLink,
   FileCode2,
   FolderOpen,
@@ -175,6 +176,56 @@ function MediaResult({
   if (type === "image") return <GeneratedImage url={url} />;
   if (type === "video") return <GeneratedVideo url={url} />;
   return <GeneratedAudio url={url} />;
+}
+
+function extractDownloadResult(result: unknown):
+  | { url: string; name: string; sizeBytes?: number }
+  | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const r = result as Record<string, unknown>;
+  const url = r.download_url ?? r.downloadUrl ?? r.url;
+  if (typeof url !== "string" || !url) return undefined;
+  const path = typeof r.path === "string" ? r.path : "download";
+  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? "download";
+  const sizeBytes =
+    typeof r.size_bytes === "number"
+      ? r.size_bytes
+      : typeof r.sizeBytes === "number"
+        ? r.sizeBytes
+        : undefined;
+  return { url, name, sizeBytes };
+}
+
+function formatBytes(bytes?: number) {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+}
+
+function DownloadResult({ result }: { result: unknown }) {
+  const file = extractDownloadResult(result);
+  if (!file) return null;
+
+  return (
+    <a
+      href={file.url}
+      download={file.name}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground shadow-xs transition-colors hover:bg-muted"
+    >
+      <Download className="size-3.5 shrink-0" />
+      <span className="truncate">{file.name}</span>
+      {file.sizeBytes != null && (
+        <span className="shrink-0 text-muted-foreground">
+          {formatBytes(file.sizeBytes)}
+        </span>
+      )}
+    </a>
+  );
 }
 
 const TOOL_ICONS: Record<string, typeof FileText> = {
@@ -532,6 +583,14 @@ function ToolCallItem({
         event.result != null && (
           <div className="ml-6 mt-2">
             <MediaResult toolName={event.toolName} result={event.result} />
+          </div>
+        )}
+      {event.toolName === "create_file" &&
+        !isPending &&
+        !isError &&
+        event.result != null && (
+          <div className="ml-6 mt-2">
+            <DownloadResult result={event.result} />
           </div>
         )}
     </div>
