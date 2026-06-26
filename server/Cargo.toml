@@ -50,7 +50,5 @@ zip = { version = "2.1", default-features = false, features = ["deflate"] }
 sysinfo = "0.33"
 dirs = "6"
 pdf-extract = "0.7"
-spider = { version = "2", features = ["sync", "socks", "ua_generator", "regex", "cookies", "smart", "chrome_stealth", "real_browser", "chrome_intercept"] }
-calamine = "0.26"
-tldextract = "0.6"
 scraper = "0.22"
+calamine = "0.26"

@@ -28,7 +28,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 // AdTech-specific
-use scraper as html_scraper;
+use scraper as scraper_crate;
 
 use super::github;
 
@@ -4410,31 +4410,31 @@ fn extract_root_domain(input: &str) -> String {
         .split('/')
         .next()
         .unwrap_or(input)
+        .split('?')
+        .next()
+        .unwrap_or(input)
         .trim_end_matches('.');
 
-    // Use tldextract for proper TLD handling
-    let ext = tldextract::TldExtractor::new(tldextract::TldOption::default());
-    match ext.extract(cleaned) {
-        Ok(result) => {
-            let domain = result.domain.unwrap_or_default();
-            let suffix = result.suffix.unwrap_or_default();
-            if domain.is_empty() {
-                cleaned.to_string()
-            } else if suffix.is_empty() {
-                domain.to_string()
-            } else {
-                format!("{}.{}", domain, suffix)
-            }
-        }
-        Err(_) => {
-            // Fallback: take last two parts
-            let parts: Vec<&str> = cleaned.split('.').collect();
-            if parts.len() >= 2 {
-                format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1])
-            } else {
-                cleaned.to_string()
-            }
-        }
+    // Known multi-part TLDs
+    const MULTI_TLDS: &[&str] = &[
+        "co.uk", "co.jp", "co.kr", "co.in", "co.za", "co.nz", "co.il",
+        "com.au", "com.br", "com.mx", "com.ar", "com.tw", "com.hk", "com.sg",
+        "org.uk", "org.au", "net.au", "ac.uk", "gov.uk", "ne.jp", "or.jp",
+    ];
+
+    let parts: Vec<&str> = cleaned.split('.').collect();
+    if parts.len() <= 2 {
+        return cleaned.to_string();
+    }
+
+    // Check if ends with a multi-part TLD
+    let last_two = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+    if MULTI_TLDS.contains(&last_two.as_str()) && parts.len() > 2 {
+        // Take domain + multi-TLD (e.g., example.co.uk)
+        format!("{}.{}", parts[parts.len() - 3], last_two)
+    } else {
+        // Standard: take last two parts
+        format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1])
     }
 }
 
@@ -4527,7 +4527,7 @@ async fn lookup_google_play(ctx: &AgentContext, bundle_id: &str, proxy: Option<&
         Ok(r) if r.status().is_success() => {
             let body = r.text().await.unwrap_or_default();
             // Parse with scraper
-            let document = scraper::Html::parse_document(&body);
+            let document = scraper_crate::Html::parse_document(&body);
 
             // Extract developer name - typically in a specific div/span
             let developer_name = extract_meta_content(&document, "og:site_name")
@@ -4660,12 +4660,12 @@ async fn lookup_apple_store(ctx: &AgentContext, app_id: &str, proxy: Option<&str
     }
 }
 
-fn extract_meta_content(doc: &scraper::Html, property: &str) -> Option<String> {
-    let selector = scraper::Selector::parse(&format!("meta[property='{}']", property)).ok()?;
+fn extract_meta_content(doc: &scraper_crate::Html, property: &str) -> Option<String> {
+    let selector = scraper_crate::Selector::parse(&format!("meta[property='{}']", property)).ok()?;
     doc.select(&selector).next()?.value().attr("content").map(|s| s.to_string())
 }
 
-fn extract_developer_from_play_page(doc: &scraper::Html) -> Option<String> {
+fn extract_developer_from_play_page(doc: &scraper_crate::Html) -> Option<String> {
     // Try multiple selectors for developer name on Google Play
     let selectors = [
         "a[href*='dev?id=']",
@@ -4673,7 +4673,7 @@ fn extract_developer_from_play_page(doc: &scraper::Html) -> Option<String> {
         "span.T32cc",
     ];
     for sel_str in selectors {
-        if let Ok(sel) = scraper::Selector::parse(sel_str) {
+        if let Ok(sel) = scraper_crate::Selector::parse(sel_str) {
             if let Some(el) = doc.select(&sel).next() {
                 let text: String = el.text().collect();
                 if !text.trim().is_empty() {
@@ -4944,11 +4944,13 @@ async fn bulk_process(ctx: &AgentContext, input: &Value) -> Result<Value> {
         for item in chunk {
             let item = item.trim().to_string();
             let target = target.clone();
-            let seller_checks = args.seller_checks.clone();
+            let seller_checks_json: Vec<Value> = args.seller_checks.iter().map(|sc| {
+                json!({"exchange_domain": sc.exchange_domain, "seller_id": sc.seller_id, "expected_role": sc.expected_role})
+            }).collect();
             let http = ctx.http.clone();
 
             handles.push(tokio::spawn(async move {
-                process_single_item(&http, &item, &target, &seller_checks).await
+                process_single_item(&http, &item, &target, &seller_checks_json).await
             }));
         }
 
@@ -5005,7 +5007,7 @@ async fn process_single_item(
     http: &reqwest::Client,
     item: &str,
     target: &str,
-    seller_checks: &[impl AsRef<SellerCheckRef>],
+    _seller_checks: &[Value],
 ) -> Value {
     // This is a simplified version for the bulk pipeline
     let item_type = classify_input(item);
@@ -5021,7 +5023,7 @@ async fn process_single_item(
             {
                 Ok(resp) if resp.status().is_success() => {
                     let body = resp.text().await.unwrap_or_default();
-                    let doc = scraper::Html::parse_document(&body);
+                    let doc = scraper_crate::Html::parse_document(&body);
                     let name = extract_developer_from_play_page(&doc).unwrap_or_else(|| "Unknown".to_string());
                     let website = extract_developer_website_from_play(&body);
                     let domain = website.as_ref().map(|w| extract_root_domain(w)).unwrap_or_default();
@@ -5194,7 +5196,7 @@ async fn process_single_item(
 }
 
 /// Marker trait so we can pass seller checks from different owners
-trait AsRef<T> { fn as_ref(&self) -> &T; }
+#[allow(dead_code)]
 struct SellerCheckRef {
     pub exchange_domain: String,
     pub seller_id: String,
@@ -5419,3 +5421,4 @@ mod patch {
         Ok(output.join(""))
     }
 }
+
