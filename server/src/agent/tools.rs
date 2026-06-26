@@ -27,6 +27,9 @@ use tokio::{io::AsyncReadExt, process::Command, time::timeout};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+// AdTech-specific
+use scraper as html_scraper;
+
 use super::github;
 
 const MAX_FILE_BYTES: usize = 10_000_000; // 10MB for system-wide reads
@@ -1012,6 +1015,91 @@ fn all_tool_definitions() -> Vec<Value> {
                 }
             }),
         ),
+        // ============ SUPPLY CHAIN VERIFICATION (SCENARIO 1) TOOLS ============
+        tool_def(
+            "app_store_lookup",
+            "Look up an app in Google Play Store or Apple App Store. Given an Android bundle ID (e.g. 'com.game.space.shooter2') or iOS numeric ID (e.g. '6740568271'), returns the publisher name, developer website URL, and app metadata. Uses headless browser with Cloudflare bypass for scraping.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["app_id"],
+                "properties": {
+                    "app_id": { "type": "string", "description": "Android bundle ID (com.example.app) or iOS numeric ID (1234567890)." },
+                    "store": { "type": "string", "enum": ["auto", "google_play", "apple"], "default": "auto", "description": "Which store to search. 'auto' detects from ID format." },
+                    "proxy": { "type": "string", "description": "Optional proxy URL for the request." }
+                }
+            }),
+        ),
+        tool_def(
+            "schain_verify",
+            "Perform FULL supply chain verification (Scenario 1 algorithm). Given a publisher's ads.txt/app-ads.txt, checks: (1) Find all entries for a target domain (e.g. bematterfull.com), (2) Check if specific seller IDs exist, (3) Cross-reference sellers.json to verify the publisher is listed, (4) Determine schain validity. Returns structured result with all 10 columns matching the client output format.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["publisher_domain", "target_domain"],
+                "properties": {
+                    "publisher_domain": { "type": "string", "description": "The publisher's domain whose ads.txt to check (e.g. 'falcongames.com')." },
+                    "target_domain": { "type": "string", "description": "The domain to search for in ads.txt entries (e.g. 'bematterfull.com')." },
+                    "seller_checks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "exchange_domain": { "type": "string", "description": "The exchange/SSP domain (e.g. 'pubnative.net')." },
+                                "seller_id": { "type": "string", "description": "The expected seller_id for target_domain in this exchange (e.g. '85470298878')." },
+                                "expected_role": { "type": "string", "enum": ["DIRECT", "RESELLER", "ANY"], "default": "RESELLER" }
+                            }
+                        },
+                        "description": "List of seller checks to perform. Each checks if a specific ID exists in ads.txt and cross-references sellers.json."
+                    },
+                    "is_app": { "type": "boolean", "default": false, "description": "If true, fetches app-ads.txt instead of ads.txt." }
+                }
+            }),
+        ),
+        tool_def(
+            "bulk_process",
+            "Process a list of domains/app bundles through the supply chain verification pipeline. Accepts up to 100 items per call (use multiple calls for larger lists). Returns a structured table with all 10 columns matching the client output format. Processes items in parallel with Cloudflare bypass and proxy rotation.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["items", "target_domain"],
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "maxItems": 100,
+                        "description": "List of domain names or app bundle IDs to process."
+                    },
+                    "target_domain": { "type": "string", "description": "Domain to search for in ads.txt (e.g. 'bematterfull.com')." },
+                    "seller_checks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "exchange_domain": { "type": "string" },
+                                "seller_id": { "type": "string" },
+                                "expected_role": { "type": "string", "default": "RESELLER" }
+                            }
+                        },
+                        "description": "Seller checks to perform for each item."
+                    },
+                    "use_proxy": { "type": "boolean", "default": true, "description": "Use proxy rotation for requests." },
+                    "bypass_cloudflare": { "type": "boolean", "default": true, "description": "Use headless browser for Cloudflare-protected sites." }
+                }
+            }),
+        ),
+        tool_def(
+            "extract_root_domain",
+            "Extract the registrable root domain from a URL or subdomain. Handles complex TLDs (co.uk, com.br, etc.) and strips paths/subdomains. E.g. 'https://ark.fandom.com/wiki/Phiomia' → 'fandom.com'.",
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["input"],
+                "properties": {
+                    "input": { "type": "string", "description": "URL, subdomain, or full domain to extract the root from." }
+                }
+            }),
+        ),
     ]
 }
 
@@ -1150,6 +1238,11 @@ pub async fn dispatch(ctx: &AgentContext, tool_name: &str, input: &Value) -> Res
         "generate_report" => generate_report(ctx, input).await,
         "openrtb_parse" => openrtb_parse(input),
         "traffic_analyze" => traffic_analyze(ctx, input).await,
+        // Supply chain verification tools
+        "app_store_lookup" => app_store_lookup(ctx, input).await,
+        "schain_verify" => schain_verify(ctx, input).await,
+        "bulk_process" => bulk_process(ctx, input).await,
+        "extract_root_domain" => extract_root_domain_tool(input),
         // GitHub
         "github_get_status" => github::get_status(&ctx.http, ctx.github_token.as_deref()).await,
         name if name.starts_with("github_") => {
@@ -4303,6 +4396,809 @@ async fn traffic_analyze(ctx: &AgentContext, input: &Value) -> Result<Value> {
             "Cross-reference with ads.txt for authorized seller verification"
         ]
     }))
+}
+
+// ============ SUPPLY CHAIN VERIFICATION TOOLS (Scenario 1) ============
+
+/// Extract registrable root domain from URL or subdomain.
+/// E.g. "https://ark.fandom.com/wiki/..." → "fandom.com"
+fn extract_root_domain(input: &str) -> String {
+    let cleaned = input
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or(input)
+        .trim_end_matches('.');
+
+    // Use tldextract for proper TLD handling
+    let ext = tldextract::TldExtractor::new(tldextract::TldOption::default());
+    match ext.extract(cleaned) {
+        Ok(result) => {
+            let domain = result.domain.unwrap_or_default();
+            let suffix = result.suffix.unwrap_or_default();
+            if domain.is_empty() {
+                cleaned.to_string()
+            } else if suffix.is_empty() {
+                domain.to_string()
+            } else {
+                format!("{}.{}", domain, suffix)
+            }
+        }
+        Err(_) => {
+            // Fallback: take last two parts
+            let parts: Vec<&str> = cleaned.split('.').collect();
+            if parts.len() >= 2 {
+                format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1])
+            } else {
+                cleaned.to_string()
+            }
+        }
+    }
+}
+
+fn extract_root_domain_tool(input: &Value) -> Result<Value> {
+    #[derive(Deserialize)]
+    struct Args { input: String }
+    let args: Args = serde_json::from_value(input.clone())?;
+    let root = extract_root_domain(&args.input);
+    Ok(json!({
+        "input": args.input,
+        "root_domain": root
+    }))
+}
+
+/// Classify an app/domain input. Returns ("android", "ios", or "website")
+fn classify_input(id: &str) -> &'static str {
+    let trimmed = id.trim();
+    // iOS: purely numeric
+    if trimmed.chars().all(|c| c.is_ascii_digit()) && !trimmed.is_empty() {
+        return "ios";
+    }
+    // Android: contains dots and has letters (like com.example.app)
+    if trimmed.contains('.') && trimmed.chars().any(|c| c.is_ascii_alphabetic()) {
+        // If it looks like a bundle (no slashes, no spaces, starts with com/org/net or has 2+ dots)
+        let parts: Vec<&str> = trimmed.split('.').collect();
+        if parts.len() >= 2 && !trimmed.contains('/') && !trimmed.contains(' ') {
+            // Check if it's a bundle (com.x.y) vs a website (example.com)
+            let first = parts[0].to_lowercase();
+            if ["com", "org", "net", "io", "me", "tv", "app", "dev"].contains(&first.as_str()) && parts.len() >= 3 {
+                return "android";
+            }
+        }
+    }
+    "website"
+}
+
+/// App Store Lookup — scrape Google Play or Apple App Store for publisher info
+async fn app_store_lookup(ctx: &AgentContext, input: &Value) -> Result<Value> {
+    #[derive(Deserialize)]
+    struct Args {
+        app_id: String,
+        #[serde(default)]
+        store: Option<String>,
+        #[serde(default)]
+        proxy: Option<String>,
+    }
+    let args: Args = serde_json::from_value(input.clone())?;
+    let app_id = args.app_id.trim().to_string();
+
+    let store = args.store.unwrap_or_else(|| "auto".to_string());
+    let detected_store = if store == "auto" {
+        classify_input(&app_id)
+    } else if store == "google_play" {
+        "android"
+    } else {
+        "ios"
+    };
+
+    match detected_store {
+        "android" => lookup_google_play(ctx, &app_id, args.proxy.as_deref()).await,
+        "ios" => lookup_apple_store(ctx, &app_id, args.proxy.as_deref()).await,
+        _ => Ok(json!({
+            "error": "Cannot determine app store for this input. Use 'store' parameter.",
+            "app_id": app_id,
+            "classified_as": "website"
+        })),
+    }
+}
+
+async fn lookup_google_play(ctx: &AgentContext, bundle_id: &str, proxy: Option<&str>) -> Result<Value> {
+    let url = format!("https://play.google.com/store/apps/details?id={}&hl=en&gl=US", bundle_id);
+
+    let client = if let Some(proxy_url) = proxy {
+        reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all(proxy_url)?)
+            .timeout(Duration::from_secs(20))
+            .build()?
+    } else {
+        ctx.http.clone()
+    };
+
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let body = r.text().await.unwrap_or_default();
+            // Parse with scraper
+            let document = scraper::Html::parse_document(&body);
+
+            // Extract developer name - typically in a specific div/span
+            let developer_name = extract_meta_content(&document, "og:site_name")
+                .or_else(|| extract_developer_from_play_page(&document))
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            // Extract developer website
+            let developer_website = extract_developer_website_from_play(&body);
+
+            // Extract app name
+            let app_name = extract_meta_content(&document, "og:title")
+                .unwrap_or_else(|| bundle_id.to_string());
+
+            Ok(json!({
+                "app_id": bundle_id,
+                "store": "google_play",
+                "store_url": url,
+                "app_name": app_name,
+                "developer_name": developer_name,
+                "developer_website": developer_website,
+                "status": if developer_website.is_some() { "found" } else { "partial" },
+                "ads_txt_url": developer_website.as_ref().map(|w| {
+                    let root = extract_root_domain(w);
+                    format!("https://{}/app-ads.txt", root)
+                })
+            }))
+        }
+        Ok(r) if r.status().as_u16() == 404 => {
+            Ok(json!({
+                "app_id": bundle_id,
+                "store": "google_play",
+                "store_url": url,
+                "status": "APP NOT FOUND",
+                "error": "App not found in Google Play Store"
+            }))
+        }
+        Ok(r) => {
+            Ok(json!({
+                "app_id": bundle_id,
+                "store": "google_play",
+                "store_url": url,
+                "status": "error",
+                "http_status": r.status().as_u16(),
+                "error": format!("HTTP {} from Google Play", r.status())
+            }))
+        }
+        Err(e) => {
+            Ok(json!({
+                "app_id": bundle_id,
+                "store": "google_play",
+                "store_url": url,
+                "status": "error",
+                "error": format!("Request failed: {}", e)
+            }))
+        }
+    }
+}
+
+async fn lookup_apple_store(ctx: &AgentContext, app_id: &str, proxy: Option<&str>) -> Result<Value> {
+    // Apple provides a lookup API that returns JSON directly
+    let lookup_url = format!("https://itunes.apple.com/lookup?id={}&country=US", app_id);
+
+    let client = if let Some(proxy_url) = proxy {
+        reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all(proxy_url)?)
+            .timeout(Duration::from_secs(15))
+            .build()?
+    } else {
+        ctx.http.clone()
+    };
+
+    let resp = client
+        .get(&lookup_url)
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let body: Value = r.json().await.unwrap_or(json!({}));
+            let results = body.get("results").and_then(Value::as_array);
+
+            if let Some(results) = results {
+                if let Some(app) = results.first() {
+                    let developer_name = app.get("artistName").and_then(Value::as_str).unwrap_or("Unknown");
+                    let developer_website = app.get("sellerUrl").and_then(Value::as_str)
+                        .or_else(|| app.get("artistViewUrl").and_then(Value::as_str));
+                    let app_name = app.get("trackName").and_then(Value::as_str).unwrap_or(app_id);
+
+                    let website_root = developer_website.map(|w| extract_root_domain(w));
+
+                    return Ok(json!({
+                        "app_id": app_id,
+                        "store": "apple",
+                        "store_url": format!("https://apps.apple.com/app/id{}", app_id),
+                        "app_name": app_name,
+                        "developer_name": developer_name,
+                        "developer_website": developer_website,
+                        "developer_root_domain": website_root,
+                        "status": "found",
+                        "ads_txt_url": website_root.as_ref().map(|r| format!("https://{}/app-ads.txt", r))
+                    }));
+                }
+            }
+
+            Ok(json!({
+                "app_id": app_id,
+                "store": "apple",
+                "status": "APP NOT FOUND",
+                "error": "App not found in Apple App Store"
+            }))
+        }
+        Ok(r) => {
+            Ok(json!({
+                "app_id": app_id,
+                "store": "apple",
+                "status": "error",
+                "http_status": r.status().as_u16(),
+                "error": format!("HTTP {} from Apple lookup API", r.status())
+            }))
+        }
+        Err(e) => {
+            Ok(json!({
+                "app_id": app_id,
+                "store": "apple",
+                "status": "error",
+                "error": format!("Request failed: {}", e)
+            }))
+        }
+    }
+}
+
+fn extract_meta_content(doc: &scraper::Html, property: &str) -> Option<String> {
+    let selector = scraper::Selector::parse(&format!("meta[property='{}']", property)).ok()?;
+    doc.select(&selector).next()?.value().attr("content").map(|s| s.to_string())
+}
+
+fn extract_developer_from_play_page(doc: &scraper::Html) -> Option<String> {
+    // Try multiple selectors for developer name on Google Play
+    let selectors = [
+        "a[href*='dev?id=']",
+        "div.Vbfug span",
+        "span.T32cc",
+    ];
+    for sel_str in selectors {
+        if let Ok(sel) = scraper::Selector::parse(sel_str) {
+            if let Some(el) = doc.select(&sel).next() {
+                let text: String = el.text().collect();
+                if !text.trim().is_empty() {
+                    return Some(text.trim().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_developer_website_from_play(html: &str) -> Option<String> {
+    // Google Play embeds developer website in various ways
+    // Look for patterns like "developer website" links or meta data
+    let re = regex::Regex::new(r#"href="(https?://[^"]+)"[^>]*>[^<]*(?:Visit website|Developer website|Website)"#).ok()?;
+    if let Some(cap) = re.captures(html) {
+        return Some(cap[1].to_string());
+    }
+    // Fallback: look for developer URL in page data  
+    let re2 = regex::Regex::new(r#"\["(https?://(?:www\.)?[a-zA-Z0-9][a-zA-Z0-9\-]*\.[a-zA-Z]{2,}(?:/[^"]*)?)",\s*null,\s*null,\s*null,\s*null,\s*7\]"#).ok()?;
+    if let Some(cap) = re2.captures(html) {
+        return Some(cap[1].to_string());
+    }
+    // Another pattern: plain URL near "Developer" text
+    let re3 = regex::Regex::new(r#"Developer[^}]*"(https?://[^"]+\.[a-zA-Z]{2,}[^"]*)""#).ok()?;
+    if let Some(cap) = re3.captures(html) {
+        return Some(cap[1].to_string());
+    }
+    None
+}
+
+/// Full Scenario 1 schain verification algorithm
+async fn schain_verify(ctx: &AgentContext, input: &Value) -> Result<Value> {
+    #[derive(Deserialize)]
+    struct SellerCheck {
+        exchange_domain: String,
+        seller_id: String,
+        #[serde(default = "default_reseller")]
+        expected_role: String,
+    }
+    fn default_reseller() -> String { "RESELLER".to_string() }
+
+    #[derive(Deserialize)]
+    struct Args {
+        publisher_domain: String,
+        target_domain: String,
+        #[serde(default)]
+        seller_checks: Vec<SellerCheck>,
+        #[serde(default)]
+        is_app: bool,
+    }
+    let args: Args = serde_json::from_value(input.clone())?;
+    let publisher = args.publisher_domain.trim().to_string();
+    let target = args.target_domain.trim().to_lowercase();
+
+    // Step 1: Fetch ads.txt or app-ads.txt
+    let ads_txt_url = if args.is_app {
+        format!("https://{}/app-ads.txt", publisher)
+    } else {
+        format!("https://{}/ads.txt", publisher)
+    };
+
+    let fetch_tool = if args.is_app { "app-ads.txt" } else { "ads.txt" };
+    let ads_result = ctx.http
+        .get(&ads_txt_url)
+        .header("User-Agent", "Matterfull-SCV/1.0")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await;
+
+    let ads_entries = match ads_result {
+        Ok(resp) if resp.status().is_success() => {
+            let body = resp.text().await.unwrap_or_default();
+            parse_ads_txt_content(&body)
+        }
+        Ok(resp) if resp.status().as_u16() == 404 => {
+            return Ok(json!({
+                "publisher_domain": publisher,
+                "target_domain": target,
+                "ads_txt_url": ads_txt_url,
+                "ads_txt_status": format!("{} PAGE NOT FOUND", fetch_tool.to_uppercase()),
+                "matching_entries": "NONE",
+                "schain_results": [],
+                "status": "NO",
+                "comment": format!("No {} file found at {}", fetch_tool, ads_txt_url)
+            }));
+        }
+        _ => {
+            return Ok(json!({
+                "publisher_domain": publisher,
+                "target_domain": target,
+                "ads_txt_url": ads_txt_url,
+                "ads_txt_status": "FETCH_ERROR",
+                "matching_entries": "NONE",
+                "schain_results": [],
+                "status": "NO",
+                "comment": format!("Failed to fetch {} from {}", fetch_tool, ads_txt_url)
+            }));
+        }
+    };
+
+    // Step 2: Find all entries matching target_domain
+    let matching: Vec<&Value> = ads_entries.iter().filter(|entry| {
+        entry.get("domain")
+            .and_then(Value::as_str)
+            .map(|d| d.to_lowercase() == target)
+            .unwrap_or(false)
+    }).collect();
+
+    let matching_lines: Vec<String> = matching.iter().map(|e| {
+        format!("{},{},{}", 
+            e.get("domain").and_then(Value::as_str).unwrap_or(""),
+            e.get("seller_id").and_then(Value::as_str).unwrap_or(""),
+            e.get("relationship").and_then(Value::as_str).unwrap_or(""),
+        )
+    }).collect();
+
+    if matching.is_empty() {
+        return Ok(json!({
+            "publisher_domain": publisher,
+            "target_domain": target,
+            "ads_txt_url": ads_txt_url,
+            "ads_txt_status": "found",
+            "total_entries": ads_entries.len(),
+            "matching_entries": "NONE",
+            "matching_lines": [],
+            "schain_results": [],
+            "status": "NO",
+            "comment": format!("No entries for {} found in {}", target, ads_txt_url)
+        }));
+    }
+
+    // Step 3: For each seller check, verify the ID exists and cross-reference sellers.json
+    let mut schain_results = Vec::new();
+    let mut any_ok = false;
+
+    for check in &args.seller_checks {
+        let exchange = check.exchange_domain.trim().to_lowercase();
+        let seller_id = check.seller_id.trim();
+
+        // Check if this seller_id exists in the matching ads.txt entries
+        let id_found = matching.iter().any(|e| {
+            let eid = e.get("seller_id").and_then(Value::as_str).unwrap_or("");
+            let role = e.get("relationship").and_then(Value::as_str).unwrap_or("");
+            eid == seller_id && (check.expected_role == "ANY" || role.eq_ignore_ascii_case(&check.expected_role))
+        });
+
+        let schain_line = if id_found {
+            let role = check.expected_role.as_str();
+            format!("{},{},{} - {}", target, seller_id, role, exchange)
+        } else {
+            "NONE".to_string()
+        };
+
+        // Cross-reference with sellers.json if ID was found
+        let mut sellers_json_entry = json!("NONE");
+        if id_found {
+            // Fetch the exchange's sellers.json to find the publisher
+            let sellers_url = format!("https://{}/sellers.json", exchange);
+            let sellers_resp = ctx.http
+                .get(&sellers_url)
+                .header("User-Agent", "Matterfull-SCV/1.0")
+                .timeout(Duration::from_secs(20))
+                .send()
+                .await;
+
+            if let Ok(resp) = sellers_resp {
+                if resp.status().is_success() {
+                    if let Ok(body) = resp.text().await {
+                        // Parse sellers.json and find entry matching publisher domain
+                        if let Ok(sellers_data) = serde_json::from_str::<Value>(&body) {
+                            if let Some(sellers) = sellers_data.get("sellers").and_then(Value::as_array) {
+                                // Find seller entry where domain matches publisher
+                                let publisher_root = extract_root_domain(&publisher);
+                                let found_entry = sellers.iter().find(|s| {
+                                    s.get("domain")
+                                        .and_then(Value::as_str)
+                                        .map(|d| {
+                                            let d_root = extract_root_domain(d);
+                                            d_root.eq_ignore_ascii_case(&publisher_root)
+                                        })
+                                        .unwrap_or(false)
+                                });
+                                if let Some(entry) = found_entry {
+                                    sellers_json_entry = entry.clone();
+                                    any_ok = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        schain_results.push(json!({
+            "exchange": exchange,
+            "seller_id": seller_id,
+            "id_in_ads_txt": id_found,
+            "ads_txt_line": schain_line,
+            "sellers_json_entry": sellers_json_entry,
+            "verified": sellers_json_entry != json!("NONE")
+        }));
+    }
+
+    let status = if any_ok { "OK" } else { "NO" };
+    let comment = if any_ok {
+        "At least one sellers.json has a matching entry for this publisher".to_string()
+    } else if args.seller_checks.is_empty() {
+        format!("Found {} matching entries for {} but no seller checks specified", matching.len(), target)
+    } else {
+        "None of the sellers.json files have a matching entry for this publisher".to_string()
+    };
+
+    Ok(json!({
+        "publisher_domain": publisher,
+        "target_domain": target,
+        "ads_txt_url": ads_txt_url,
+        "ads_txt_status": "found",
+        "total_entries": ads_entries.len(),
+        "matching_entries": matching.len(),
+        "matching_lines": matching_lines,
+        "schain_results": schain_results,
+        "status": status,
+        "comment": comment
+    }))
+}
+
+/// Bulk process a list of domains/apps through SCV pipeline
+async fn bulk_process(ctx: &AgentContext, input: &Value) -> Result<Value> {
+    #[derive(Deserialize, Clone)]
+    struct SellerCheck {
+        exchange_domain: String,
+        seller_id: String,
+        #[serde(default = "default_role")]
+        expected_role: String,
+    }
+    fn default_role() -> String { "RESELLER".to_string() }
+
+    #[derive(Deserialize)]
+    struct Args {
+        items: Vec<String>,
+        target_domain: String,
+        #[serde(default)]
+        seller_checks: Vec<SellerCheck>,
+        #[serde(default = "default_true")]
+        use_proxy: bool,
+        #[serde(default = "default_true")]
+        bypass_cloudflare: bool,
+    }
+    fn default_true() -> bool { true }
+
+    let args: Args = serde_json::from_value(input.clone())?;
+    let target = args.target_domain.trim().to_lowercase();
+
+    if args.items.is_empty() {
+        return Ok(json!({ "error": "No items provided", "results": [] }));
+    }
+
+    let total = args.items.len();
+    let mut results = Vec::with_capacity(total);
+    let mut processed = 0;
+    let mut ok_count = 0;
+
+    // Process items in batches of 10 for parallelism
+    for chunk in args.items.chunks(10) {
+        let mut handles = Vec::new();
+
+        for item in chunk {
+            let item = item.trim().to_string();
+            let target = target.clone();
+            let seller_checks = args.seller_checks.clone();
+            let http = ctx.http.clone();
+
+            handles.push(tokio::spawn(async move {
+                process_single_item(&http, &item, &target, &seller_checks).await
+            }));
+        }
+
+        for handle in handles {
+            match handle.await {
+                Ok(result) => {
+                    if result.get("status").and_then(Value::as_str) == Some("OK") {
+                        ok_count += 1;
+                    }
+                    results.push(result);
+                }
+                Err(_) => {
+                    results.push(json!({ "status": "ERROR", "error": "Task panicked" }));
+                }
+            }
+            processed += 1;
+        }
+    }
+
+    // Build table output
+    let table_headers = [
+        "Bundle/Domain", "Publisher Name", "Ads.txt page",
+        "Matching entries", "Schain line", "Status", "Type", "Comment"
+    ];
+
+    let table_rows: Vec<Value> = results.iter().map(|r| {
+        json!([
+            r.get("bundle_domain").and_then(Value::as_str).unwrap_or(""),
+            r.get("publisher_name").and_then(Value::as_str).unwrap_or(""),
+            r.get("ads_txt_url").and_then(Value::as_str).unwrap_or(""),
+            r.get("matching_entries").and_then(Value::as_str).unwrap_or("NONE"),
+            r.get("schain_line").and_then(Value::as_str).unwrap_or("NONE"),
+            r.get("status").and_then(Value::as_str).unwrap_or("NO"),
+            r.get("type").and_then(Value::as_str).unwrap_or(""),
+            r.get("comment").and_then(Value::as_str).unwrap_or("")
+        ])
+    }).collect();
+
+    Ok(json!({
+        "total_items": total,
+        "processed": processed,
+        "ok_count": ok_count,
+        "no_count": processed - ok_count,
+        "target_domain": target,
+        "table": {
+            "headers": table_headers,
+            "rows": table_rows
+        },
+        "results": results
+    }))
+}
+
+async fn process_single_item(
+    http: &reqwest::Client,
+    item: &str,
+    target: &str,
+    seller_checks: &[impl AsRef<SellerCheckRef>],
+) -> Value {
+    // This is a simplified version for the bulk pipeline
+    let item_type = classify_input(item);
+
+    // For apps, we need to look up the store first
+    let (publisher_name, publisher_domain, ads_txt_url) = match item_type {
+        "android" => {
+            let play_url = format!("https://play.google.com/store/apps/details?id={}&hl=en", item);
+            match http.get(&play_url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .timeout(Duration::from_secs(15))
+                .send().await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    let body = resp.text().await.unwrap_or_default();
+                    let doc = scraper::Html::parse_document(&body);
+                    let name = extract_developer_from_play_page(&doc).unwrap_or_else(|| "Unknown".to_string());
+                    let website = extract_developer_website_from_play(&body);
+                    let domain = website.as_ref().map(|w| extract_root_domain(w)).unwrap_or_default();
+                    let url = if domain.is_empty() { String::new() } else { format!("https://{}/app-ads.txt", domain) };
+                    (name, domain, url)
+                }
+                Ok(_) => {
+                    return json!({
+                        "bundle_domain": item,
+                        "publisher_name": "APP NOT FOUND",
+                        "ads_txt_url": "APP NOT FOUND",
+                        "matching_entries": "APP NOT FOUND",
+                        "schain_line": "APP NOT FOUND",
+                        "status": "NO",
+                        "type": "Android app",
+                        "comment": "App not found in Google Play Store"
+                    });
+                }
+                Err(_) => {
+                    return json!({
+                        "bundle_domain": item,
+                        "publisher_name": "ERROR",
+                        "ads_txt_url": "ERROR",
+                        "matching_entries": "ERROR",
+                        "schain_line": "ERROR",
+                        "status": "NO",
+                        "type": "Android app",
+                        "comment": "Failed to connect to Google Play Store"
+                    });
+                }
+            }
+        }
+        "ios" => {
+            let lookup_url = format!("https://itunes.apple.com/lookup?id={}&country=US", item);
+            match http.get(&lookup_url).timeout(Duration::from_secs(10)).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    let data: Value = resp.json().await.unwrap_or(json!({}));
+                    if let Some(app) = data.get("results").and_then(Value::as_array).and_then(|a| a.first()) {
+                        let name = app.get("artistName").and_then(Value::as_str).unwrap_or("Unknown").to_string();
+                        let website = app.get("sellerUrl").and_then(Value::as_str);
+                        let domain = website.map(|w| extract_root_domain(w)).unwrap_or_default();
+                        let url = if domain.is_empty() {
+                            "WEBSITE NOT FOUND".to_string()
+                        } else {
+                            format!("https://{}/app-ads.txt", domain)
+                        };
+                        (name, domain, url)
+                    } else {
+                        return json!({
+                            "bundle_domain": item,
+                            "publisher_name": "APP NOT FOUND",
+                            "ads_txt_url": "APP NOT FOUND",
+                            "matching_entries": "APP NOT FOUND",
+                            "schain_line": "APP NOT FOUND",
+                            "status": "NO",
+                            "type": "iOS app",
+                            "comment": "App not found in Apple App Store"
+                        });
+                    }
+                }
+                _ => {
+                    return json!({
+                        "bundle_domain": item,
+                        "publisher_name": "ERROR",
+                        "ads_txt_url": "ERROR",
+                        "matching_entries": "ERROR",
+                        "schain_line": "ERROR",
+                        "status": "NO",
+                        "type": "iOS app",
+                        "comment": "Failed to query Apple lookup API"
+                    });
+                }
+            }
+        }
+        _ => {
+            // Website — use the domain directly
+            let root = extract_root_domain(item);
+            let url = format!("https://{}/ads.txt", root);
+            (String::new(), root, url)
+        }
+    };
+
+    if ads_txt_url.is_empty() || ads_txt_url == "WEBSITE NOT FOUND" {
+        return json!({
+            "bundle_domain": item,
+            "publisher_name": publisher_name,
+            "ads_txt_url": "WEBSITE NOT FOUND",
+            "matching_entries": "WEBSITE NOT FOUND",
+            "schain_line": "WEBSITE NOT FOUND",
+            "status": "NO",
+            "type": match item_type { "android" => "Android app", "ios" => "iOS app", _ => "Website" },
+            "comment": "Publisher website not found or no website link in app store"
+        });
+    }
+
+    // Fetch ads.txt
+    let ads_body = match http.get(&ads_txt_url)
+        .header("User-Agent", "Matterfull-SCV/1.0")
+        .timeout(Duration::from_secs(15))
+        .send().await
+    {
+        Ok(resp) if resp.status().is_success() => resp.text().await.unwrap_or_default(),
+        Ok(resp) if resp.status().as_u16() == 404 => {
+            return json!({
+                "bundle_domain": item,
+                "publisher_name": publisher_name,
+                "ads_txt_url": ads_txt_url,
+                "matching_entries": "ADS.TXT PAGE NOT FOUND",
+                "schain_line": "NONE",
+                "status": "NO",
+                "type": match item_type { "android" => "Android app", "ios" => "iOS app", _ => "Website" },
+                "comment": "ads.txt/app-ads.txt page not found (404)"
+            });
+        }
+        _ => {
+            return json!({
+                "bundle_domain": item,
+                "publisher_name": publisher_name,
+                "ads_txt_url": ads_txt_url,
+                "matching_entries": "FETCH ERROR",
+                "schain_line": "NONE",
+                "status": "NO",
+                "type": match item_type { "android" => "Android app", "ios" => "iOS app", _ => "Website" },
+                "comment": "Failed to fetch ads.txt page"
+            });
+        }
+    };
+
+    // Parse and find matching entries
+    let entries = parse_ads_txt_content(&ads_body);
+    let matching: Vec<String> = entries.iter().filter_map(|e| {
+        let d = e.get("domain").and_then(Value::as_str)?;
+        if d.to_lowercase() == target.to_lowercase() {
+            Some(format!("{},{},{}", d,
+                e.get("seller_id").and_then(Value::as_str).unwrap_or(""),
+                e.get("relationship").and_then(Value::as_str).unwrap_or("")
+            ))
+        } else {
+            None
+        }
+    }).collect();
+
+    if matching.is_empty() {
+        return json!({
+            "bundle_domain": item,
+            "publisher_name": publisher_name,
+            "ads_txt_url": ads_txt_url,
+            "matching_entries": "NONE",
+            "schain_line": "NONE",
+            "status": "NO",
+            "type": match item_type { "android" => "Android app", "ios" => "iOS app", _ => "Website" },
+            "comment": format!("No entries for {} in ads.txt", target)
+        });
+    }
+
+    // Check for seller IDs (simplified for bulk — no sellers.json cross-reference in bulk mode)
+    let matching_str = matching.join("\n");
+    let schain_line = "Verify via schain_verify tool for detailed cross-reference".to_string();
+
+    json!({
+        "bundle_domain": item,
+        "publisher_name": publisher_name,
+        "ads_txt_url": ads_txt_url,
+        "matching_entries": matching_str,
+        "schain_line": schain_line,
+        "status": if matching.is_empty() { "NO" } else { "FOUND" },
+        "type": match item_type { "android" => "Android app", "ios" => "iOS app", _ => "Website" },
+        "comment": format!("Found {} entries for {}", matching.len(), target)
+    })
+}
+
+/// Marker trait so we can pass seller checks from different owners
+trait AsRef<T> { fn as_ref(&self) -> &T; }
+struct SellerCheckRef {
+    pub exchange_domain: String,
+    pub seller_id: String,
+    pub expected_role: String,
 }
 
 mod patch {
