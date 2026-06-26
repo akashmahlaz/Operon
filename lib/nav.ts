@@ -4,12 +4,12 @@
 
 import {
   MessageSquare,
-  Sparkles,
-  Wrench,
-  Plug,
-  Calendar,
-  History,
-  ScrollText,
+  Search,
+  Globe,
+  Package,
+  Bell,
+  FileBarChart,
+  BookOpen,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -23,12 +23,12 @@ export interface DashboardNavItem {
 
 export const dashboardNav: DashboardNavItem[] = [
   { title: "Chat", href: "/dashboard/chat", icon: MessageSquare, group: "workspace" },
-  { title: "Agents", href: "/dashboard/agents", icon: Sparkles, group: "build" },
-  { title: "Skills", href: "/dashboard/skills", icon: Wrench, group: "build" },
-  { title: "Integrations", href: "/dashboard/integrations", icon: Plug, group: "build" },
-  { title: "Scheduler", href: "/dashboard/scheduler", icon: Calendar, group: "system" },
-  { title: "Sessions", href: "/dashboard/sessions", icon: History, group: "system" },
-  { title: "Logs", href: "/dashboard/logs", icon: ScrollText, group: "system" },
+  { title: "Explore", href: "/dashboard/explore", icon: Search, group: "workspace" },
+  { title: "Domains", href: "/dashboard/domains", icon: Globe, group: "workspace" },
+  { title: "Inventory", href: "/dashboard/inventory", icon: Package, group: "workspace" },
+  { title: "Monitor", href: "/dashboard/monitor", icon: Bell, group: "build" },
+  { title: "Reports", href: "/dashboard/reports", icon: FileBarChart, group: "build" },
+  { title: "Knowledge", href: "/dashboard/knowledge", icon: BookOpen, group: "build" },
   { title: "Settings", href: "/dashboard/settings", icon: Settings, group: "system" },
 ];
 

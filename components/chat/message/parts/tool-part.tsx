@@ -19,6 +19,15 @@ import {
   Sparkles,
   Terminal,
   Workflow,
+  Shield,
+  Link2,
+  FileBarChart,
+  Clock,
+  Scan,
+  AlertTriangle,
+  Package,
+  BookOpen,
+  Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { JsonViewer } from "@/components/chat/message/parts/json-viewer";
@@ -26,6 +35,13 @@ import {
   ChartBlock,
   detectChartData,
 } from "@/components/chat/message/parts/chart-block";
+import {
+  AdsTxtToolOutput,
+  SellersJsonToolOutput,
+  VerifyDomainToolOutput,
+  FraudDetectionToolOutput,
+  CrawlDomainToolOutput,
+} from "@/components/chat/message/parts/tools/adtech-tools";
 import type { ToolCallPart } from "@/components/chat/message/types";
 
 // ---------------------------------------------------------------------------
@@ -80,6 +96,23 @@ const TOOL_ICONS: Record<string, typeof FileText> = {
   github_merge_pr: GitMerge,
   github_push_files: PencilLine,
   github_save_token: GitBranch,
+
+  // AdTech investigation tools
+  fetch_ads_txt: FileText,
+  fetch_app_ads_txt: FileText,
+  fetch_sellers_json: Package,
+  verify_domain: Shield,
+  dns_lookup: Globe,
+  whois_lookup: Globe,
+  ssl_inspect: Shield,
+  validate_supply_chain: Link2,
+  crawl_domain: Scan,
+  wayback_lookup: Clock,
+  check_proxy: Radio,
+  detect_fraud: AlertTriangle,
+  generate_report: FileBarChart,
+  openrtb_parse: BookOpen,
+  traffic_analyze: Search,
 };
 
 const ACTIVE_TOOL_STATES = [
@@ -251,6 +284,38 @@ export function describeTool(
     case "github_save_token":
       return "Saved GitHub token";
 
+    // AdTech investigation tools
+    case "fetch_ads_txt":
+      return asString(a.domain) ? `Fetching ads.txt for ${asString(a.domain)}` : "Fetching ads.txt";
+    case "fetch_app_ads_txt":
+      return asString(a.domain) ? `Fetching app-ads.txt for ${asString(a.domain)}` : "Fetching app-ads.txt";
+    case "fetch_sellers_json":
+      return asString(a.domain) ? `Fetching sellers.json from ${asString(a.domain)}` : "Fetching sellers.json";
+    case "verify_domain":
+      return asString(a.domain) ? `Verifying ${asString(a.domain)}` : "Verifying domain";
+    case "dns_lookup":
+      return asString(a.domain) ? `DNS lookup for ${asString(a.domain)}` : "DNS lookup";
+    case "whois_lookup":
+      return asString(a.domain) ? `WHOIS lookup for ${asString(a.domain)}` : "WHOIS lookup";
+    case "ssl_inspect":
+      return asString(a.domain) ? `Inspecting SSL for ${asString(a.domain)}` : "Inspecting SSL";
+    case "validate_supply_chain":
+      return "Validating supply chain";
+    case "crawl_domain":
+      return asString(a.url) ? `Crawling ${asString(a.url)}` : "Crawling domain";
+    case "wayback_lookup":
+      return asString(a.url) ? `Wayback Machine: ${asString(a.url)}` : "Querying Wayback Machine";
+    case "check_proxy":
+      return asString(a.action) === "test" ? "Testing proxy" : asString(a.action) === "rotate" ? "Rotating proxy" : "Listing proxies";
+    case "detect_fraud":
+      return asString(a.domain) ? `Detecting fraud for ${asString(a.domain)}` : "Running fraud detection";
+    case "generate_report":
+      return asString(a.title) ? `Generating: ${asString(a.title)}` : "Generating report";
+    case "openrtb_parse":
+      return "Parsing OpenRTB payload";
+    case "traffic_analyze":
+      return asString(a.domain) ? `Analyzing traffic for ${asString(a.domain)}` : "Analyzing traffic";
+
     default:
       if (path) return `${toolName} ${basename(path)}`;
       if (query) return `${toolName} ${quote(query)}`;
@@ -344,6 +409,7 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
     asString(a.filePath) ??
     asString(a.filename) ??
     asString(a.url) ??
+    asString(a.domain) ??
     formatRepo(a) ??
     asString(a.query) ??
     asString(a.search) ??
@@ -482,6 +548,23 @@ export function ToolPart({ tool }: { tool: ToolCallPart }) {
                   </pre>
                 ) : (
                   (() => {
+                    // Rich AdTech tool outputs
+                    const r = tool.result as Record<string, unknown> | null;
+                    if (r && tool.toolName === "fetch_ads_txt") {
+                      return <AdsTxtToolOutput data={r as any} />;
+                    }
+                    if (r && tool.toolName === "fetch_sellers_json") {
+                      return <SellersJsonToolOutput data={r as any} />;
+                    }
+                    if (r && tool.toolName === "verify_domain") {
+                      return <VerifyDomainToolOutput data={r as any} />;
+                    }
+                    if (r && tool.toolName === "detect_fraud") {
+                      return <FraudDetectionToolOutput data={r as any} />;
+                    }
+                    if (r && tool.toolName === "crawl_domain") {
+                      return <CrawlDomainToolOutput data={r as any} />;
+                    }
                     const chart = detectChartData(tool.result);
                     if (chart) {
                       return (

@@ -1697,35 +1697,38 @@ function ChatPage() {
             {messages.length === 0 && !conversationId && (
               <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6">
                 {/* Greeting */}
-                <div className="flex items-center gap-3">
-                  <Sparkles className="size-9 shrink-0 text-primary" />
-                  <h1 className="font-heading text-[32px] font-semibold tracking-tight text-foreground sm:text-[40px]">
-                    {getGreeting()}, {userName}
-                  </h1>
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-3">
+                    <Sparkles className="size-9 shrink-0 text-primary" />
+                    <h1 className="font-heading text-[32px] font-semibold tracking-tight text-foreground sm:text-[40px]">
+                      {getGreeting()}, {userName}
+                    </h1>
+                  </div>
+                  <p className="text-sm text-muted-foreground">What do you want to investigate today?</p>
                 </div>
                 {/* Suggestion chips */}
                 <div className="flex flex-wrap justify-center gap-2">
                   {[
-                    { icon: SearchCheck, label: "Verify Chain" },
-                    { icon: GlobeCheck, label: "Analyze Domain" },
-                    { icon: UserSearch, label: "Publishers" },
-                    { icon: Coffee, label: "Life stuff" },
-                    { icon: Mail, label: "From Gmail" },
+                    { icon: SearchCheck, label: "Verify Domain" },
+                    { icon: GlobeCheck, label: "Fetch ads.txt" },
+                    { icon: UserSearch, label: "Inspect Sellers" },
+                    { icon: ChartLine, label: "Analyze Traffic" },
+                    { icon: Shield, label: "Detect Fraud" },
                   ].map(({ icon: Icon, label }) => (
                     <button
                       key={label}
                       type="button"
                       onClick={() =>
                         setInput(
-                          label === "Verify Chain"
-                            ? "Verify ads chains for compliance and performance."
-                            : label === "Analyze Domain"
-                              ? "Analyze domain for insights."
-                              : label === "Publishers"
-                                ? "Check publishers for credibility."
-                                : label === "Life stuff"
-                                  ? "Help me with "
-                                  : "Summarise my last 5 emails",
+                          label === "Verify Domain"
+                            ? "Verify cnn.com — check ads.txt, sellers.json, DNS, SSL, and risk score."
+                            : label === "Fetch ads.txt"
+                              ? "Fetch and parse ads.txt for "
+                              : label === "Inspect Sellers"
+                                ? "Inspect sellers.json for google.com and check authorized seller IDs."
+                                : label === "Analyze Traffic"
+                                  ? "Analyze traffic patterns and detect anomalies for "
+                                  : "Run fraud detection on — check for domain spoofing, IVT, and MFA signals.",
                         )
                       }
                       className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm text-foreground/80 shadow-xs transition-all hover:border-primary/40 hover:bg-accent hover:text-foreground"

@@ -14,7 +14,7 @@ export function OperonWordmark({
       fill="none"
       className={cn("select-none", className)}
       style={{ height, width: "auto" }}
-      aria-label="Bematterfull"
+      aria-label="Matterfull"
     >
       <text
         x="0"
@@ -24,7 +24,7 @@ export function OperonWordmark({
         fontWeight="700"
         fill="currentColor"
       >
-        Bematterfull
+        Matterfull
       </text>
     </svg>
   );
@@ -35,7 +35,7 @@ export function OperonMark({ className }: { className?: string }) {
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src="/logo.png"
-      alt="Bematterfull"
+      alt="Matterfull"
       className={cn(
         "h-7 w-7 shrink-0 object-contain",
         "mix-blend-multiply dark:mix-blend-normal dark:brightness-0 dark:invert",

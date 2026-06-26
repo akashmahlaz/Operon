@@ -77,7 +77,7 @@ export function AppSidebar({ conversations = [], user }: AppSidebarProps) {
         <Link href="/dashboard/chat" className="flex items-center gap-2.5 py-0.5">
           <OperonMark className="size-7 shrink-0" />
           <span className="group-data-[collapsible=icon]:hidden font-semibold text-[15px] tracking-tight text-foreground">
-            Operon
+            Matterfull
           </span>
         </Link>
 
